@@ -50,6 +50,7 @@ pub mod deprecation;
 pub mod deps_graph;
 pub mod dirs;
 pub mod duration;
+pub mod embedding;
 pub mod env;
 pub mod env_diff;
 pub mod env_value;

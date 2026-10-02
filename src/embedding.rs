@@ -1,0 +1,135 @@
+//! Unstable Oyzu embedding boundary. One context per fresh worker process.
+//! The frontend owns configuration, locks, receipts, admission and isolation.
+use crate::config::{Config, settings};
+use eyre::{Result, ensure};
+pub use mise_util::embedding::{HttpFuture, HttpRequest, HttpTransport};
+use std::{
+    collections::BTreeSet,
+    path::PathBuf,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+pub struct Options {
+    /// Operation-private roots, never an ambient mise cache or project directory.
+    pub state: PathBuf,
+    /// The verified Oyzu image used by the worker's parent.
+    pub frontend: PathBuf,
+    /// Explicit core identifiers admitted by the supervisor (short names).
+    pub tools: BTreeSet<String>,
+    /// Absent for local operations. No transport means fail closed, not direct HTTP.
+    pub transport: Option<Arc<HttpTransport>>,
+}
+
+pub struct Session {
+    config: Arc<Config>,
+}
+static STARTED: AtomicBool = AtomicBool::new(false);
+static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
+
+impl Session {
+    /// Call before any mise API or application-created thread. The parent must
+    /// construct a minimal environment; ambient mise overrides are rejected.
+    /// Failure consumes the process context. Discard the worker rather than retry.
+    pub fn initialize(options: Options) -> Result<Self> {
+        ensure!(
+            !STARTED.swap(true, Ordering::SeqCst),
+            "embedding worker cannot be reused"
+        );
+        ensure!(
+            !settings::is_loaded() && !crate::config::is_loaded(),
+            "mise was initialized before embedding context"
+        );
+        ensure!(
+            options.state.is_absolute() && options.frontend.is_absolute(),
+            "embedding paths must be absolute"
+        );
+        for (key, _) in std::env::vars_os() {
+            let key = key.to_string_lossy().to_ascii_uppercase();
+            ensure!(
+                matches!(
+                    key.as_str(),
+                    "PATH"
+                        | "SYSTEMROOT"
+                        | "WINDIR"
+                        | "COMSPEC"
+                        | "PATHEXT"
+                        | "HOME"
+                        | "USERPROFILE"
+                        | "TEMP"
+                        | "TMP"
+                        | "LANG"
+                        | "LC_ALL"
+                        | "TERM"
+                        | "RUST_BACKTRACE"
+                ),
+                "embedding worker inherited an unapproved environment variable"
+            );
+        }
+        ensure!(
+            options
+                .tools
+                .iter()
+                .all(|tool| matches!(tool.as_str(), "node" | "go" | "java" | "python")),
+            "embedding tool is not admitted"
+        );
+        mise_util::embedding::initialize(mise_util::embedding::Context {
+            state: options.state.clone(),
+            frontend: options.frontend.clone(),
+            transport: options.transport,
+        })?;
+        ensure!(
+            *crate::env::HOME == options.state.join("home"),
+            "home was initialized before embedding context"
+        );
+        ensure!(
+            *crate::env::MISE_DATA_DIR == options.state.join("data"),
+            "data root was initialized before embedding context"
+        );
+        ensure!(
+            *crate::env::MISE_CACHE_DIR == options.state.join("cache"),
+            "cache root was initialized before embedding context"
+        );
+        *crate::env::ARGS.write().unwrap() = vec![options.frontend.to_string_lossy().into_owned()];
+        let mut defaults = (*settings::load_defaults()?).clone();
+        defaults.auto_install = false;
+        defaults.lockfile = Some(false);
+        defaults.enable_tools = Some(options.tools);
+        defaults.disable_backends = vec!["asdf".into(), "vfox".into()];
+        defaults.node.compile = Some(false);
+        defaults.node.corepack = false;
+        defaults.node.npm_shim = false;
+        defaults.node.default_packages_file = Some(options.state.join("no-default-node-packages"));
+        defaults.go.default_packages_file = options.state.join("no-default-go-packages");
+        defaults.python.compile = Some(false);
+        defaults.python.default_packages_file =
+            Some(options.state.join("no-default-python-packages"));
+        let defaults = Arc::new(defaults);
+        SETTINGS
+            .set(defaults.clone())
+            .map_err(|_| eyre::eyre!("embedding settings already initialized"))?;
+        settings::set_loader(|| {
+            SETTINGS
+                .get()
+                .cloned()
+                .ok_or_else(|| eyre::eyre!("embedding settings absent"))
+        });
+        settings::store(defaults);
+        crate::register_util_hooks();
+        crate::frontend::register(crate::frontend::Frontend {
+            lockfiles_after_install: |_, _| {
+                Box::pin(async { eyre::bail!("embedding frontend owns lockfile publication") })
+            },
+            subcommand_names: Vec::new,
+        });
+        Ok(Self {
+            config: Config::for_embedding()?,
+        })
+    }
+
+    pub fn config(&self) -> &Arc<Config> {
+        &self.config
+    }
+}

@@ -718,6 +718,10 @@ impl Client {
     /// (e.g. form-encoded POST in the GitHub OAuth flow) but still want the
     /// shared timeouts, gzip, and user-agent.
     pub fn reqwest(&self) -> Result<&reqwest::Client> {
+        ensure!(
+            crate::embedding::context().is_none(),
+            "embedding forbids access to the direct HTTP client"
+        );
         self.reqwest
             .as_ref()
             .map_err(|err| eyre!("Could not initialize the HTTP client: {err}"))
@@ -1518,6 +1522,15 @@ impl Client {
         verb_label: &str,
         options: SendOnceOptions,
     ) -> Result<Response> {
+        if crate::embedding::context().is_some() {
+            let response = crate::embedding::send(crate::embedding::HttpRequest {
+                method,
+                url,
+                headers: headers.clone(),
+            })
+            .await?;
+            return options.check_response(response);
+        }
         let original_url = url.clone();
         crate::resolve_progress::fetching(&url);
         #[cfg(unix)]

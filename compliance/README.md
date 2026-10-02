@@ -3,8 +3,11 @@
 Status: operational guardrails proposed for maintainer review. The license policy
 and every dependency disposition remain **unapproved**. Inventory consistency is
 not permission to distribute and is not a legal opinion. The initial technical
-review owner is **@micahlmartin**, selected by the maintainer; legal approval is
-separate. No first-party license is selected by these files.
+review owner is **@micahlmartin**, selected by the maintainer. On 2026-10-02 the
+maintainer also assigned him ownership of licensing and distribution decisions.
+Ownership does not constitute approval of a dependency graph, policy or release;
+the actual decision must still be recorded against the reviewed revision.
+No first-party license is selected by these files.
 
 ## Rules for people and AI agents
 
