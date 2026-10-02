@@ -85,6 +85,51 @@ unaudited engineering outputs, not compliance-certified product releases.
 
 ## Review and GitHub enforcement
 
+### Candidate Cargo evidence
+
+`tooling/compliance/cargo_graph.py` collects review evidence for the embedding
+candidate with default features disabled and `rustls,vfox/vendored-lua` enabled:
+
+```sh
+python tooling/compliance/cargo_graph.py --target x86_64-unknown-linux-gnu --output cargo-evidence.json
+```
+
+Python 3.11+, Git, the candidate's Rust compiler and a previously provisioned Cargo
+cache are required. The command runs only offline, locked Cargo metadata; it does
+not compile, execute a backend, fetch missing packages or change the lockfile.
+The other supported target filters are `aarch64-apple-darwin` and
+`x86_64-pc-windows-msvc`. A target filter is not native execution evidence.
+Missing cached metadata is an error: provision it separately and repeat the
+command. The output path must have an existing parent and is overwritten.
+
+The report follows normal and build dependency edges from mise, excludes edges
+that are exclusively development dependencies, retains Cargo's declared license
+expressions without selecting alternatives, and records lock checksums, resolved
+features and LF-normalized hashes of conventional notice files and declared
+license files. It binds the source revision, lockfile, metadata and collector
+hashes, and reports tracked worktree changes. Untracked source and generated
+inputs require separate review; a dirty report does not identify a clean release.
+Cargo metadata can unify development features, so this is a candidate review
+graph, not the exact compiled or distributed graph or a release SBOM.
+
+Scans are bounded to 4,096 packages, 100,000 directory entries per package,
+4,096 conventional notice files per package and 2 MiB per notice. Directory
+symlinks/junctions and symlinked notices are excluded and counted; unresolved or
+external declared license files are explicitly recorded. Repository package scans
+may include nested package notices. Source headers, generated and vendored code,
+native libraries, artifact contents and source-delivery obligations still need
+review. Source identities containing URL credentials or queries are rejected;
+absolute cache/workspace paths are not emitted. Every disposition remains
+`unreviewed`, with `legal_approval: false` and `release_ready: false`.
+
+The first Linux candidate collection at `3552b5d03111f6d3143233dbebb94a8368110a9e`
+observed 955 packages. It was collected from a worktree reported as modified and
+is exploratory evidence, not approval of that revision. Regression tests cover
+normal/build/development edges, unknown declarations, notice drift, malformed
+identities, missing lock entries and excluded external links.
+
+### Approval enforcement
+
 The workflow runs on every PR (no path filter), main pushes, review events and
 manual dispatch. It checks current input hashes and component notices and retains
 a report explicitly marked `legal_approval: false`, `release_ready: false`.
