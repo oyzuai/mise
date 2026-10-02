@@ -322,3 +322,26 @@ regressions, scoped strict library/example Clippy, formatting and all 22 existin
 embedding scenarios pass on Linux. The compliance inventory and 24 guard tests
 pass (two Windows symlink skips). Native CI for this revision remains pending;
 no dependency or preserved notice changes are part of this change.
+
+### Captured Python catalog replay
+
+An explicitly ignored library test, `python_catalog_captured_replay`, reads an
+independently retained `OYZU_PYTHON_METADATA_FIXTURE`. It verifies the three target
+URLs, compressed and decoded byte counts/hashes, then passes the original gzip
+bytes through the Rust decoder and the decoded catalog through the embedded
+selector. For Python 3.12.13 it requires the exact 20250323 install-only artifact
+on every target, then removes that line and requires rejection of substitution.
+The fixture is bounded to 68 MiB and each compressed/decoded catalog to 16 MiB.
+
+Run it explicitly with `cargo test --locked --lib --no-default-features --features
+rustls,vfox/vendored-lua python_catalog_captured_replay -- --ignored`, setting the
+fixture environment variable first. The input is produced by the public Oyzu
+`tooling/mise-upstream/capture_python_metadata.py` helper. No network or archive
+acquisition occurs in this test. Ordinary test runs report it ignored; this is
+wired into native CI with a revision/hash-pinned capture helper and retained
+fixture/report artifacts. Linux replay passed with Docker networking disabled
+against the retained 2026-10-02 capture. Rust 1.95 formatting and scoped strict
+library/example Clippy pass; native replay CI remains pending.
+This adds first-party verification to existing MIT-covered source; no upstream
+notices, dependencies or license choices change. It does not exercise the HTTP
+transport, public Session API, attestation verification or installation.

@@ -91,6 +91,47 @@ jobs:
         env:
           OYZU_GO_METADATA_FIXTURE: ${{ runner.temp }}/go-metadata-fixture.json
         run: cargo +1.95.0 run --locked --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua
+      - name: Capture real Python qualification metadata
+        id: python_capture
+        if: ${{ !cancelled() && steps.boundary_checks.outcome == 'success' }}
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import urllib.request
+
+          revision = "e4993135fb966ab918c78932249e4d6188e05c13"
+          url = f"https://raw.githubusercontent.com/micahlmartin/oyzu/{revision}/tooling/mise-upstream/capture_python_metadata.py"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              source = response.read(65537)
+          if len(source) > 65536 or hashlib.sha256(source).hexdigest() != "f9a867c1d1b80eacf1b8737300641ec32be5da52fea97f4b1bfa2d794bc89365":
+              raise RuntimeError("pinned Python fixture provisioner hash mismatch")
+          output = Path(os.environ["RUNNER_TEMP"]) / "python-metadata-fixture.json"
+          with tempfile.TemporaryDirectory() as temporary:
+              script = Path(temporary) / "tooling/mise-upstream/capture_python_metadata.py"
+              script.parent.mkdir(parents=True)
+              script.write_bytes(source)
+              with (output.parent / "python-metadata-capture-report.json").open("w", encoding="utf-8") as report:
+                  subprocess.run([sys.executable, str(script), "--output", str(output)], check=True, stdout=report)
+      - name: Replay real Python catalogs through library selection
+        if: ${{ !cancelled() && steps.python_capture.outcome == 'success' }}
+        env:
+          OYZU_PYTHON_METADATA_FIXTURE: ${{ runner.temp }}/python-metadata-fixture.json
+        run: cargo +1.95.0 test --locked --lib --no-default-features --features rustls,vfox/vendored-lua python_catalog_captured_replay -- --ignored
+      - name: Preserve real Python metadata evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-metadata-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/python-metadata-fixture.json
+            ${{ runner.temp }}/python-metadata-capture-report.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Capture real Java qualification metadata
         id: java_capture
         if: ${{ !cancelled() && steps.boundary_checks.outcome == 'success' }}

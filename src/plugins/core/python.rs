@@ -1883,6 +1883,85 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires independently captured OYZU_PYTHON_METADATA_FIXTURE"]
+    fn python_catalog_captured_replay() {
+        use base64::Engine;
+        use sha2::{Digest, Sha256};
+
+        let path = std::env::var_os("OYZU_PYTHON_METADATA_FIXTURE")
+            .expect("provide independently captured Python metadata");
+        let file = std::fs::File::open(path).unwrap();
+        let mut bytes = Vec::new();
+        file.take(68 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert!(bytes.len() <= 68 * 1024 * 1024);
+        let fixture: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(fixture["format"], 1);
+        assert_eq!(fixture["response_encoding"], "base64");
+        let cases = fixture["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 3);
+        for (index, (target, platform)) in [
+            ("linux/amd64/gnu", "x86_64-unknown-linux-gnu"),
+            ("darwin/arm64/native", "aarch64-apple-darwin"),
+            ("windows/amd64/msvc", "x86_64-pc-windows-msvc"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let case = &cases[index];
+            assert_eq!(case["target"], target);
+            let url =
+                format!("https://mise-versions.jdx.dev/tools/python-precompiled-{platform}.gz");
+            assert_eq!(case["catalog_url"], url);
+            let raw = base64::engine::general_purpose::STANDARD
+                .decode(fixture["responses"][&url].as_str().unwrap())
+                .unwrap();
+            assert!(raw.len() <= PYTHON_CATALOG_LIMIT);
+            assert_eq!(case["compressed_size"], raw.len());
+            assert_eq!(
+                case["compressed_sha256"],
+                format!("sha256:{}", hex::encode(Sha256::digest(&raw)))
+            );
+            let manifest = decode_python_catalog(&raw, PYTHON_CATALOG_LIMIT).unwrap();
+            assert_eq!(case["decoded_size"], manifest.len());
+            assert_eq!(
+                case["decoded_sha256"],
+                format!(
+                    "sha256:{}",
+                    hex::encode(Sha256::digest(manifest.as_bytes()))
+                )
+            );
+            let locked = format!("cpython-3.12.13+20250323-{platform}-install_only.tar.gz");
+            let selected = select_embedded_python_precompiled(
+                &manifest,
+                "3.12.13",
+                platform,
+                None,
+                Some(&locked),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(selected, ("20250323".to_owned(), locked.clone()));
+            let without_locked = manifest
+                .lines()
+                .filter(|line| *line != locked)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                select_embedded_python_precompiled(
+                    &without_locked,
+                    "3.12.13",
+                    platform,
+                    None,
+                    Some(&locked),
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn python_catalog_locked_artifact_never_falls_back_in_embedding() {
         let old = "cpython-3.12.13+20260728-x86_64-unknown-linux-gnu-install_only.tar.gz";
         let new = "cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz";
