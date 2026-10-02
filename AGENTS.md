@@ -340,7 +340,8 @@ Follow [the compliance policy](compliance/README.md) for every third-party impor
 dependency change, license/notice edit and distribution. Preserve all upstream
 copyright and license notices, including separately licensed subdirectories.
 Do not infer that mise's root MIT license covers every dependency or installed tool.
-The initial technical reviewer is @micahlmartin; legal approval remains separate.
+@micahlmartin owns technical review and licensing/distribution decisions. Owner
+assignment does not replace a recorded approval of the actual reviewed revision.
 AI may collect evidence but must not approve its own exceptions, submit a human's
 approval, fabricate review records, remove notices or weaken a failed check.
 Run `python tooling/compliance/check.py` and the guard's regression tests.

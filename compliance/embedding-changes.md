@@ -18,8 +18,12 @@ No dependency manifest or lockfile is changed by this embedding patch.
 
 The library-only `oyzu-embedding-check` example exercises initialization in fresh
 child processes with invalid ambient project/global configuration, absent and
-supplied transports, rejected overrides/backend identifiers, and duplicate PATH
-entries. Run with Rust 1.95:
+supplied transports, rejected overrides/backend identifiers, settings resets and
+duplicate PATH entries. A fifth scenario uses mise's actual Node catalog parser
+and prefix resolver with fixture metadata supplied by the transport callback.
+It initializes the backend registry explicitly and resolves `22` to `22.15.0`.
+The public mise aggregation service is disabled in embedding mode; publisher
+metadata is routed through the supplied transport. Run with Rust 1.95:
 
 ```sh
 cargo run --locked --no-default-features --features rustls,vfox/vendored-lua --example oyzu-embedding-check
@@ -28,7 +32,7 @@ cargo run --locked --no-default-features --features rustls,vfox/vendored-lua --e
 This example does not build or invoke the mise CLI. The transport hook is not a
 network sandbox: other clients and subprocesses still require Oyzu's isolated
 worker and acquisition broker. Only four core identifiers are currently admitted;
-actual backend execution, Aqua/npm admission, native platform qualification,
+actual tool installation/execution, Aqua/npm admission, native platform qualification,
 secure installation, receipts and Oyzu lock publication remain separate work.
 The callback response and artifact bytes must be checked by the frontend.
 
@@ -37,3 +41,9 @@ Every refresh must rebase/reapply these patches, rerun their conformance checks
 and the Oyzu qualification matrix, review changed dependencies and notices, and
 produce a separately reviewed exact revision update in Oyzu. Neither passing
 tests nor this inventory authorizes distribution.
+
+On Linux, all five scenarios and strict Clippy for the library/conformance target
+passed with Rust 1.95. The `Oyzu embedding boundary` workflow runs those checks on
+native Linux, Windows and macOS hosts. A declared matrix is not passing evidence;
+review the run for the exact candidate head. Full upstream CLI checks are excluded
+because Oyzu does not build or invoke a separate mise executable.

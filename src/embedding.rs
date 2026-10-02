@@ -95,6 +95,9 @@ impl Session {
         *crate::env::ARGS.write().unwrap() = vec![options.frontend.to_string_lossy().into_owned()];
         let mut defaults = (*settings::load_defaults()?).clone();
         defaults.auto_install = false;
+        // The supervisor authorizes publisher metadata through its broker;
+        // never silently substitute the public mise aggregation service.
+        defaults.use_versions_host = false;
         defaults.lockfile = Some(false);
         defaults.enable_tools = Some(options.tools);
         defaults.disable_backends = vec!["asdf".into(), "vfox".into()];

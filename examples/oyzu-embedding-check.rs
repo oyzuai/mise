@@ -21,15 +21,22 @@ fn options(state: PathBuf) -> Result<Options> {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<_> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("child") {
-        return child(&args[2], PathBuf::from(&args[3]));
+    let args: Vec<_> = std::env::args_os().collect();
+    if args.get(1).map(|value| value.as_os_str()) == Some(std::ffi::OsStr::new("child")) {
+        ensure!(args.len() == 4, "invalid child arguments");
+        return child(
+            args[2]
+                .to_str()
+                .ok_or_else(|| eyre::eyre!("scenario is not UTF-8"))?,
+            PathBuf::from(&args[3]),
+        );
     }
+    ensure!(args.len() == 1, "unexpected conformance arguments");
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     std::fs::write(root.join("mise.toml"), "this is not valid TOML [")?;
     std::fs::write(root.join(".tool-versions"), "node this-must-not-be-read")?;
-    for scenario in ["offline", "transport", "hostile", "unadmitted"] {
+    for scenario in ["offline", "transport", "hostile", "unadmitted", "backend"] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
         std::fs::write(
@@ -82,6 +89,22 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if scenario == "backend" {
+        let calls = calls.clone();
+        input.transport = Some(Arc::new(move |request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                ensure!(
+                    request.url.as_str() == "https://nodejs.org/dist/index.json",
+                    "unexpected backend metadata URL: {}",
+                    request.url
+                );
+                Ok(reqwest::Response::from(http::Response::builder().status(200).body(
+                    r#"[{"version":"v24.1.0","date":"2025-05-19","files":["linux-x64"]},{"version":"v22.15.0","date":"2025-04-22","files":["linux-x64"]},{"version":"v22.14.0","date":"2025-02-11","files":["linux-x64"]}]"#
+                )?))
+            })
+        }));
+    }
     if scenario == "transport" {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |request| {
@@ -141,6 +164,9 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    if scenario == "backend" {
+        return runtime.block_on(check_backend(&session, calls));
+    }
     let result = runtime.block_on(mise::http::HTTP.get_text("https://example.invalid/catalog"));
     ensure!(
         mise::http::HTTP.reqwest().is_err(),
@@ -195,5 +221,44 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         );
         ensure!(calls.load(Ordering::SeqCst) == 0, "unexpected callback");
     }
+    Ok(())
+}
+
+async fn check_backend(session: &Session, calls: Arc<AtomicUsize>) -> Result<()> {
+    use mise::toolset::{ResolveOptions, ToolRequest, ToolSource};
+    mise::backend::load_tools().await?;
+    let argument = Arc::new(mise::args::BackendArg::from("node"));
+    let backend = mise::backend::get(&argument)
+        .ok_or_else(|| eyre::eyre!("core Node backend unavailable"))?;
+    let versions = backend.list_remote_versions(session.config()).await?;
+    ensure!(
+        versions == ["22.14.0", "22.15.0", "24.1.0"],
+        "upstream Node catalog normalization failed: {versions:?}"
+    );
+    let request = ToolRequest::new(argument, "22", ToolSource::Argument)?;
+    let resolved = request
+        .resolve(
+            session.config(),
+            &ResolveOptions {
+                latest_versions: true,
+                latest_versions_for_all_requests: true,
+                use_locked_version: false,
+                ..Default::default()
+            },
+        )
+        .await?;
+    ensure!(
+        resolved.version == "22.15.0",
+        "upstream Node prefix resolution failed: {}",
+        resolved.version
+    );
+    ensure!(
+        calls.load(Ordering::SeqCst) > 0,
+        "backend bypassed metadata transport"
+    );
+    ensure!(
+        session.config().config_files.is_empty(),
+        "backend discovered ambient configuration"
+    );
     Ok(())
 }
