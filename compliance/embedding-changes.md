@@ -304,3 +304,21 @@ size compatibility evidence only, not retained catalog provenance or parser repl
 
 All 22 existing fresh-process embedding harness scenarios also pass on Linux
 with this change. The run builds the library/example only, not a mise executable.
+
+### Embedded Python locked-catalog selection (validation in progress)
+
+The explicit-target Python precompiled catalog path now checks the embedding
+context before accepting upstream's selection. When a locked filename is supplied,
+an absent or substituted candidate is an error. Unlocked selection still uses
+upstream ordering, and ordinary nonembedded refresh retains its existing fallback.
+The check returns metadata only; it does not verify publisher identity, authorize
+installation or replace attestation enforcement. Direct locked-URL installation
+and complete Oyzu worker integration remain separate qualification requirements.
+
+A library regression exercises exact old-build retention, unlocked newest-build
+selection, missing/empty/wrong-version denial and unchanged ordinary fallback.
+The native workflow includes this alongside the gzip boundary test. Both Python
+regressions, scoped strict library/example Clippy, formatting and all 22 existing
+embedding scenarios pass on Linux. The compliance inventory and 24 guard tests
+pass (two Windows symlink skips). Native CI for this revision remains pending;
+no dependency or preserved notice changes are part of this change.

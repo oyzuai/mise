@@ -838,8 +838,17 @@ impl PythonPlugin {
         // `mise lock` refreshes the same artifact. `mise lock --bump` resolves
         // without the existing lockfile, so locked_filename is None and the
         // newest build wins.
-        let result =
-            select_python_precompiled(&raw, version, &platform, flavor.as_deref(), locked_filename);
+        let result = if mise_util::embedding::context().is_some() {
+            select_embedded_python_precompiled(
+                &raw,
+                version,
+                &platform,
+                flavor.as_deref(),
+                locked_filename,
+            )?
+        } else {
+            select_python_precompiled(&raw, version, &platform, flavor.as_deref(), locked_filename)
+        };
         if let Some(locked_filename) = locked_filename
             && result
                 .as_ref()
@@ -1314,6 +1323,26 @@ fn python_precompiled_filename_from_url<'a>(url: &'a str, version: &str) -> Opti
     filename
         .starts_with(&format!("cpython-{version}+{release}-"))
         .then_some(filename)
+}
+
+// Embedded frozen selection must never substitute a different PBS build.
+// Reuse upstream ranking for updates, but require an exact match for a locked file.
+fn select_embedded_python_precompiled(
+    manifest: &str,
+    version: &str,
+    platform: &str,
+    flavor: Option<&str>,
+    locked_filename: Option<&str>,
+) -> Result<Option<(String, String)>> {
+    let selected = select_python_precompiled(manifest, version, platform, flavor, locked_filename);
+    if let Some(locked) = locked_filename
+        && selected
+            .as_ref()
+            .is_none_or(|(_, filename)| filename != locked)
+    {
+        bail!("locked Python artifact is absent from the supplied catalog");
+    }
+    Ok(selected)
 }
 
 fn select_python_precompiled(
@@ -1851,6 +1880,40 @@ mod tests {
 
         let opts = opts_with("patch_sysconfig", "true");
         assert!(PythonOptions::new(&opts).lockfile_options().is_empty());
+    }
+
+    #[test]
+    fn python_catalog_locked_artifact_never_falls_back_in_embedding() {
+        let old = "cpython-3.12.13+20260728-x86_64-unknown-linux-gnu-install_only.tar.gz";
+        let new = "cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz";
+        let manifest = format!("{old}\n{new}\n");
+        let platform = "x86_64-unknown-linux-gnu";
+        let exact =
+            select_embedded_python_precompiled(&manifest, "3.12.13", platform, None, Some(old))
+                .unwrap()
+                .unwrap();
+        assert_eq!(exact.1, old);
+        let update = select_embedded_python_precompiled(&manifest, "3.12.13", platform, None, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.1, new);
+        assert!(
+            select_embedded_python_precompiled(new, "3.12.13", platform, None, Some(old)).is_err()
+        );
+        assert!(
+            select_embedded_python_precompiled("", "3.12.13", platform, None, Some(old)).is_err()
+        );
+        assert!(
+            select_embedded_python_precompiled(&manifest, "3.12.12", platform, None, Some(old))
+                .is_err()
+        );
+        // Upstream's ordinary refresh behavior remains available outside embedding.
+        assert_eq!(
+            select_python_precompiled(new, "3.12.13", platform, None, Some(old))
+                .unwrap()
+                .1,
+            new
+        );
     }
 
     #[test]

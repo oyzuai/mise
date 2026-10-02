@@ -55,7 +55,7 @@ jobs:
       - name: Check bounded metadata response collection
         run: cargo +1.95.0 test --locked -p mise-util --lib --no-default-features --features rustls metadata_bounds_tests
       - name: Check bounded Python catalog decoding
-        run: cargo +1.95.0 test --locked --lib --no-default-features --features rustls,vfox/vendored-lua python_catalog_gzip_is_bounded_and_validated
+        run: cargo +1.95.0 test --locked --lib --no-default-features --features rustls,vfox/vendored-lua python_catalog_
       - name: Check library and conformance target
         run: cargo +1.95.0 clippy --locked --lib --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua -- -D warnings
       - name: Run fresh-process boundary and real backend parser checks
