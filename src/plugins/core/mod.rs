@@ -30,6 +30,15 @@ pub(crate) fn go_archive_facts(
 mod java;
 mod node;
 pub use node::NodeArchiveFacts;
+pub(crate) async fn resolve_node_version(
+    config: &Arc<crate::config::Config>,
+    request: &str,
+    constraints: &[String],
+) -> eyre::Result<String> {
+    node::NodePlugin::new()
+        .embedding_resolve_version(config, request, constraints)
+        .await
+}
 pub(crate) fn node_archive_facts(
     version: &str,
     target: &crate::backend::platform_target::PlatformTarget,

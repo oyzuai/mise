@@ -146,6 +146,20 @@ impl Session {
         &self.config
     }
 
+    /// Resolve an admitted Node request against supplied/cached metadata, using
+    /// upstream aliases, prefix matching and npm range semantics. All native
+    /// constraints must match. Returns a cataloged canonical stable version,
+    /// never an installed/path/ref fallback. Platform/archive verification and
+    /// policy remain separate. Metadata transport and private cache may be used.
+    pub async fn resolve_node_version(
+        &self,
+        request: &str,
+        native_constraints: &[String],
+    ) -> Result<String> {
+        ensure!(self.tools.contains("node"), "Node backend is not admitted");
+        crate::plugins::core::resolve_node_version(&self.config, request, native_constraints).await
+    }
+
     /// Project names from this revision's baked registry onto admitted core
     /// backends. This is not version resolution or permission to install. No
     /// floating registry, ambient aliases, filesystem or network is consulted.

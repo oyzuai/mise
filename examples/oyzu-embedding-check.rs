@@ -46,6 +46,8 @@ fn main() -> Result<()> {
         "go-facts",
         "java-metadata",
         "catalog",
+        "node-resolve",
+        "node-resolve-offline",
     ] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -139,7 +141,7 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
             })
         }));
     }
-    if scenario == "backend" {
+    if matches!(scenario, "backend" | "node-resolve") {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |request| {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -179,6 +181,19 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         let names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
         eyre::eyre!("{error}; isolated conformance child variable names: {names:?}")
     })?;
+    if scenario == "node-resolve" {
+        tokio::runtime::Runtime::new()?.block_on(check_node_resolution(&session, calls))?;
+        return Ok(());
+    }
+    if scenario == "node-resolve-offline" {
+        ensure!(
+            tokio::runtime::Runtime::new()?
+                .block_on(session.resolve_node_version("22.14.0", &[]))
+                .is_err(),
+            "exact pin bypassed absent metadata transport"
+        );
+        return Ok(());
+    }
     if scenario == "catalog" {
         let aliases = session.tool_aliases()?;
         for short in ["node", "go", "java", "python"] {
@@ -227,6 +242,12 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         "Go facts escaped session admission"
     );
     if scenario == "node-denied" {
+        ensure!(
+            tokio::runtime::Runtime::new()?
+                .block_on(session.resolve_node_version("22", &[]))
+                .is_err(),
+            "Node resolution escaped session admission"
+        );
         ensure!(
             session.tool_aliases()?.is_empty(),
             "empty admission exposed aliases"
@@ -435,6 +456,103 @@ async fn check_go_facts(session: &Session) -> Result<()> {
             .node_archive_facts("22.15.0", "linux/amd64/gnu")
             .is_err(),
         "Node escaped Go-only admission"
+    );
+    Ok(())
+}
+
+async fn check_node_resolution(session: &Session, calls: Arc<AtomicUsize>) -> Result<()> {
+    for query in [
+        "",
+        "system",
+        "path:/tmp/node",
+        "ref:main",
+        "ref-main",
+        "sub-1:22",
+        "prefix:22",
+        ">=nope",
+        "22\n",
+        "$(echo injected)",
+    ] {
+        ensure!(
+            session.resolve_node_version(query, &[]).await.is_err(),
+            "unsafe Node selector accepted"
+        );
+    }
+    ensure!(
+        session
+            .resolve_node_version(&"2".repeat(1025), &[])
+            .await
+            .is_err(),
+        "oversized request accepted"
+    );
+    ensure!(
+        session
+            .resolve_node_version("22", &vec!["22".into(); 257])
+            .await
+            .is_err(),
+        "too many constraints accepted"
+    );
+    ensure!(
+        session
+            .resolve_node_version("22", &["path:/tmp/node".into()])
+            .await
+            .is_err(),
+        "unsafe constraint accepted"
+    );
+    ensure!(
+        calls.load(Ordering::SeqCst) == 0,
+        "invalid input acquired metadata"
+    );
+    for (query, expected) in [
+        ("22", "22.15.0"),
+        ("22.14.0", "22.14.0"),
+        ("v22.14.0", "22.14.0"),
+        ("latest", "24.1.0"),
+        ("lts/jod", "22.15.0"),
+        (">=22 <24", "22.15.0"),
+        ("^22.14.0", "22.15.0"),
+        ("22.x", "22.15.0"),
+        (">=24 || <22.15", "24.1.0"),
+    ] {
+        ensure!(
+            session.resolve_node_version(query, &[]).await? == expected,
+            "Node selector resolved incorrectly: {query}"
+        );
+    }
+    let constraints = [">=22".into(), "<22.15".into()];
+    ensure!(
+        session.resolve_node_version("latest", &constraints).await? == "22.14.0",
+        "constraints were not intersected before selection"
+    );
+    let reversed = [constraints[1].clone(), constraints[0].clone()];
+    ensure!(
+        session.resolve_node_version("latest", &reversed).await? == "22.14.0",
+        "constraint order changed selection"
+    );
+    ensure!(
+        session
+            .resolve_node_version("22", &[">=24".into()])
+            .await
+            .is_err(),
+        "incompatible constraint was ignored"
+    );
+    for query in ["99", "22.14.9", "22.14.0-rc.1", "22.14.0+build"] {
+        ensure!(
+            session.resolve_node_version(query, &[]).await.is_err(),
+            "uncataloged or nonstable pin accepted"
+        );
+    }
+    ensure!(
+        calls.load(Ordering::SeqCst) == 1,
+        "resolution did not reuse supplied catalog"
+    );
+    ensure!(
+        session.config().config_files.is_empty(),
+        "resolution loaded ambient configuration"
+    );
+    ensure!(
+        !mise::env::MISE_DATA_DIR.join("installs").exists(),
+        "resolution installed a tool"
     );
     Ok(())
 }

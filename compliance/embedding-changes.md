@@ -106,3 +106,17 @@ checks all four initial core tools, unadmitted-tool exclusion and reload stabili
 the existing empty-admission scenario checks that no aliases are exposed.
 This is name projection, not version resolution or backend qualification. No
 dependency, registry data, copyright or license notice changes accompany it.
+
+`Session::resolve_node_version` adds bounded metadata-only selection for admitted
+Node. Its adapter lives under the Node backend and composes the existing remote
+catalog, aliases, ordering, fuzzy prefix matcher and npm semver range filter.
+It intersects the request with every supplied native constraint, then chooses
+the latest matching canonical stable catalog entry. Exact pins must exist in
+the catalog; no installed, path, system, ref or symbolic fallback is accepted.
+Inputs are validated before metadata access. Transport and operation-private
+catalog caches can be used, but no archive is acquired and no tool is installed
+or executed. Target availability, publisher verification, release-age policy,
+lock authoring and the other backends' selection remain separate responsibilities.
+Two fresh-process scenarios exercise supplied-catalog selection and no-transport
+denial; existing empty admission also rejects this operation. Original notices
+are unchanged and no dependency or registry data is added.

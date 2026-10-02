@@ -29,6 +29,8 @@ use tokio::sync::Mutex;
 use url::Url;
 use xx::regex;
 
+mod embedding;
+
 /// Upstream Node archive/layout facts, not a verified or admitted installation
 /// plan. The supervisor must obtain exact bytes, size, publisher evidence and
 /// a reviewed descriptor before converting these facts into its owned layout.
