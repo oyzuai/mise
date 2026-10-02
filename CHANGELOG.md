@@ -1,5 +1,32 @@
 # Changelog
 
+## [2026.10.1](https://github.com/jdx/mise/compare/v2026.10.0..v2026.10.1) - 2026-10-02
+
+### 🐛 Bug Fixes
+
+- **(aqua)** invalidate incompatible compiled registry caches by @jdx in [#13884](https://github.com/jdx/mise/pull/13884)
+- **(completions)** complete `:task` shorthand for the current config root by @pikeas in [#13882](https://github.com/jdx/mise/pull/13882)
+- **(daemons)** start task daemons without a shell so they work on Windows by @JamBalaya56562 in [#13714](https://github.com/jdx/mise/pull/13714)
+- **(packslip)** retry missing declared skills by @jdx in [#13885](https://github.com/jdx/mise/pull/13885)
+- **(release)** back up alpine bump to GitHub and allow SSH push to GitLab by @jdx in [#13892](https://github.com/jdx/mise/pull/13892)
+- **(shim)** stop native shim copies recursing through mise x by @JamBalaya56562 in [#13681](https://github.com/jdx/mise/pull/13681)
+- **(task)** stop running tasks when mise run --timeout expires by @Marukome0743 in [#13876](https://github.com/jdx/mise/pull/13876)
+
+### 📚 Documentation
+
+- **(contributing)** make the restricted AI reply policy and instant ban unmissable by @jdx in [#13886](https://github.com/jdx/mise/pull/13886)
+
+### Ci
+
+- give windows-unit enough time to save its cache by @jdx in [#13874](https://github.com/jdx/mise/pull/13874)
+
+### 📦 Aqua Registry Updates
+
+#### New Packages (2)
+
+- [`agentgateway/agentgateway/agctl`](https://github.com/agentgateway/agentgateway)
+- [`agentgateway/agentgateway/agentgateway`](https://github.com/agentgateway/agentgateway)
+
 ## [2026.10.0](https://github.com/jdx/mise/compare/v2026.9.18..v2026.10.0) - 2026-10-01
 
 ### 🚀 Features
