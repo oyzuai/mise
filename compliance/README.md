@@ -88,7 +88,7 @@ unaudited engineering outputs, not compliance-certified product releases.
 ### Candidate Cargo evidence
 
 `tooling/compliance/cargo_graph.py` collects review evidence for the embedding
-candidate with default features disabled and `rustls,vfox/vendored-lua` enabled:
+candidate with default features disabled and `rustls,vendored-lua` enabled:
 
 ```sh
 python tooling/compliance/cargo_graph.py --target x86_64-unknown-linux-gnu --output cargo-evidence.json --notice-bundle cargo-notices.zip

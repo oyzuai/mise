@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 SPEC = importlib.util.spec_from_file_location("compliance_check", Path(__file__).with_name("check.py"))
 guard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(guard)
-FEATURES = "rustls,vfox/vendored-lua"
+FEATURES = "rustls,vendored-lua"
 TARGETS = ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")
 
 

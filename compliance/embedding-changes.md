@@ -7,7 +7,7 @@ Upstream base: `b1b8d3e4aed6a0a610fdd1d845df11da470afd08` in `jdx/mise`.
 Governance foundation: `503e384d1` on `oyzuai/mise`'s
 `codex/license-compliance` branch. Upstream MIT license and notices are retained;
 these changes do not select licenses for dependencies or downloaded tools.
-No dependency manifest or lockfile is changed by this embedding patch.
+The manifest exposes the existing vendored Lua feature for external consumers; no dependency version or lockfile changes are introduced by that forwarding feature.
 
 | Patch | Purpose | Removal condition |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ The public mise aggregation service is disabled in embedding mode; publisher
 metadata is routed through the supplied transport. Run with Rust 1.95:
 
 ```sh
-cargo run --locked --no-default-features --features rustls,vfox/vendored-lua --example oyzu-embedding-check
+cargo run --locked --no-default-features --features rustls,vendored-lua --example oyzu-embedding-check
 ```
 
 This example does not build or invoke the mise CLI. The transport hook is not a
@@ -334,7 +334,7 @@ on every target, then removes that line and requires rejection of substitution.
 The fixture is bounded to 68 MiB and each compressed/decoded catalog to 16 MiB.
 
 Run it explicitly with `cargo test --locked --lib --no-default-features --features
-rustls,vfox/vendored-lua python_catalog_captured_replay -- --ignored`, setting the
+rustls,vendored-lua python_catalog_captured_replay -- --ignored`, setting the
 fixture environment variable first. The input is produced by the public Oyzu
 `tooling/mise-upstream/capture_python_metadata.py` helper. No network or archive
 acquisition occurs in this test. Ordinary test runs report it ignored; this is
@@ -404,3 +404,14 @@ decoder and public Session replay; native results remain pending.
 
 This adds first-party conformance code without changing dependencies or notices.
 It does not authenticate publishers, acquire archives or authorize distribution.
+
+## External consumer feature selection
+
+The public `vendored-lua` Cargo feature forwards to the existing
+`vfox/vendored-lua` feature. External consumers must use
+`default-features = false, features = ["rustls", "vendored-lua"]` on their pinned
+mise dependency. Cargo rejects a slash-containing feature name inside a dependency
+feature list, so the earlier package-local invocation could not be copied into
+Oyzu's manifest. No package version, upstream notice or license alternative is
+changed. Existing default features remain unchanged. Qualification and candidate
+graph collection now use the same public feature selection as a consumer.
