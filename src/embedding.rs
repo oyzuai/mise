@@ -4,7 +4,7 @@ use crate::config::{Config, settings};
 use eyre::{Result, ensure};
 pub use mise_util::embedding::{HttpFuture, HttpRequest, HttpTransport};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{
         Arc, OnceLock,
@@ -102,6 +102,7 @@ impl Session {
         *crate::env::ARGS.write().unwrap() = vec![options.frontend.to_string_lossy().into_owned()];
         let mut defaults = (*settings::load_defaults()?).clone();
         defaults.auto_install = false;
+        defaults.registry_floating = false;
         // The supervisor authorizes publisher metadata through its broker;
         // never silently substitute the public mise aggregation service.
         defaults.use_versions_host = false;
@@ -143,6 +144,36 @@ impl Session {
 
     pub fn config(&self) -> &Arc<Config> {
         &self.config
+    }
+
+    /// Project names from this revision's baked registry onto admitted core
+    /// backends. This is not version resolution or permission to install. No
+    /// floating registry, ambient aliases, filesystem or network is consulted.
+    pub fn tool_aliases(&self) -> Result<BTreeMap<String, String>> {
+        let mut aliases = BTreeMap::new();
+        for short in &self.tools {
+            let tool = crate::registry::baked_registry()
+                .get(short)
+                .ok_or_else(|| eyre::eyre!("admitted tool absent from pinned registry"))?;
+            let canonical = format!("core:{short}");
+            ensure!(
+                tool.short == short && tool.backends.iter().any(|b| b.full == canonical),
+                "pinned registry no longer supplies admitted core backend"
+            );
+            for alias in std::iter::once(short.as_str())
+                .chain(tool.aliases.iter().copied())
+                .chain(std::iter::once(canonical.as_str()))
+            {
+                ensure!(
+                    !alias.contains(':') || alias == canonical,
+                    "registry alias cannot rebind a canonical backend"
+                );
+                if let Some(previous) = aliases.insert(alias.to_owned(), canonical.clone()) {
+                    ensure!(previous == canonical, "ambiguous pinned registry alias");
+                }
+            }
+        }
+        Ok(aliases)
     }
 
     /// Compute facts for an exact stable version without acquisition,

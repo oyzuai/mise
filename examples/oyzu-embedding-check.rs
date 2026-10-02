@@ -45,6 +45,7 @@ fn main() -> Result<()> {
         "backend",
         "go-facts",
         "java-metadata",
+        "catalog",
     ] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -82,6 +83,9 @@ fn main() -> Result<()> {
 
 fn child(scenario: &str, state: PathBuf) -> Result<()> {
     let mut input = options(state.clone())?;
+    if scenario == "catalog" {
+        input.tools = ["node", "go", "java", "python"].map(String::from).into();
+    }
     if scenario == "go-facts" {
         input.tools = BTreeSet::from(["go".into()]);
     }
@@ -175,6 +179,31 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         let names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
         eyre::eyre!("{error}; isolated conformance child variable names: {names:?}")
     })?;
+    if scenario == "catalog" {
+        let aliases = session.tool_aliases()?;
+        for short in ["node", "go", "java", "python"] {
+            let canonical = format!("core:{short}");
+            ensure!(aliases.get(short) == Some(&canonical), "missing core alias");
+            ensure!(
+                aliases.get(&canonical) == Some(&canonical),
+                "missing canonical name"
+            );
+        }
+        ensure!(
+            !aliases.contains_key("ruby"),
+            "unadmitted tool escaped catalog"
+        );
+        mise::config::settings::clear();
+        ensure!(
+            !mise::config::Settings::get().registry_floating,
+            "floating registry enabled"
+        );
+        ensure!(
+            session.tool_aliases()? == aliases,
+            "catalog changed after reload"
+        );
+        return Ok(());
+    }
     if scenario == "java-metadata" {
         tokio::runtime::Runtime::new()?.block_on(check_java_metadata(&session))?;
         ensure!(
@@ -198,6 +227,10 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         "Go facts escaped session admission"
     );
     if scenario == "node-denied" {
+        ensure!(
+            session.tool_aliases()?.is_empty(),
+            "empty admission exposed aliases"
+        );
         ensure!(
             session
                 .node_archive_facts("22.15.0", "linux/amd64/gnu")

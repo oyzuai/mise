@@ -95,3 +95,14 @@ archive filtering, unavailable-version denial, isolated Java admission and one
 metadata callback per target. It neither downloads a JDK nor claims a Java layout
 plan, publisher verification or install parity. Java production source is unchanged;
 this adds evidence for reusing its parser without creating another catalog.
+
+`Session::tool_aliases` projects the source revision's baked registry onto the
+session's admitted core backends. It returns short names, registry aliases and
+canonical core IDs; it rejects canonical rebinding, ambiguous aliases and drift
+that removes the admitted backend. It does not read floating registry caches,
+ambient aliases or project configuration. Embedded settings also disable the
+floating registry, including after settings reload. A ninth isolated scenario
+checks all four initial core tools, unadmitted-tool exclusion and reload stability;
+the existing empty-admission scenario checks that no aliases are exposed.
+This is name projection, not version resolution or backend qualification. No
+dependency, registry data, copyright or license notice changes accompany it.
