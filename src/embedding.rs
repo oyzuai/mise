@@ -28,6 +28,7 @@ pub struct Session {
     tools: BTreeSet<String>,
 }
 
+pub use crate::plugins::core::GoArchiveFacts;
 pub use crate::plugins::core::NodeArchiveFacts;
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
@@ -149,28 +150,48 @@ impl Session {
     /// host platform metadata. Availability and authenticity are not implied.
     /// Only the initial three target tuples are exposed here.
     pub fn node_archive_facts(&self, version: &str, target: &str) -> Result<NodeArchiveFacts> {
+        let target_platform = self.archive_target("node", version, target)?;
+        crate::plugins::core::node_archive_facts(version, &target_platform, target)
+    }
+
+    /// Compute target-aware Go archive facts without Git discovery, acquisition,
+    /// installation or execution. The caller must independently verify catalog
+    /// membership, exact bytes/checksum and admitted layout before installation.
+    pub fn go_archive_facts(&self, version: &str, target: &str) -> Result<GoArchiveFacts> {
+        let target_platform = self.archive_target("go", version, target)?;
+        Ok(crate::plugins::core::go_archive_facts(
+            version,
+            &target_platform,
+            target,
+        ))
+    }
+    fn archive_target(
+        &self,
+        tool: &str,
+        version: &str,
+        target: &str,
+    ) -> Result<crate::backend::platform_target::PlatformTarget> {
         ensure!(
             version.len() <= 128 && target.len() <= 64,
-            "Node plan input exceeds limit"
+            "archive plan input exceeds limit"
         );
         ensure!(
-            self.tools.contains("node"),
-            "Node backend is not admitted in this embedding session"
+            self.tools.contains(tool),
+            "backend is not admitted in this embedding session"
         );
         let parsed = semver::Version::parse(version)?;
         ensure!(
             parsed.pre.is_empty() && parsed.build.is_empty() && parsed.to_string() == version,
-            "Node archive facts require an exact stable version"
+            "archive facts require an exact stable version"
         );
         let platform = match target {
             "linux/amd64/gnu" => "linux-x64",
             "darwin/arm64/native" => "macos-arm64",
             "windows/amd64/msvc" => "windows-x64",
-            _ => eyre::bail!("Node archive target is not supported by the embedding boundary"),
+            _ => eyre::bail!("archive target is not supported by the embedding boundary"),
         };
-        let target_platform = crate::backend::platform_target::PlatformTarget::new(
+        Ok(crate::backend::platform_target::PlatformTarget::new(
             crate::platform::Platform::parse(platform)?,
-        );
-        crate::plugins::core::node_archive_facts(version, &target_platform, target)
+        ))
     }
 }

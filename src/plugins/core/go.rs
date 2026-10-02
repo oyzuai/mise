@@ -21,6 +21,24 @@ use tempfile::tempdir_in;
 use versions::Versioning;
 use xx::regex;
 
+const GO_ARCHIVE_ROOT: &str = "go";
+const GO_BIN_DIRECTORY: &str = "bin";
+
+/// Upstream archive/layout facts only, not availability, verified checksums,
+/// publisher evidence or permission to install/execute a target artifact.
+#[derive(Debug, serde::Serialize)]
+pub struct GoArchiveFacts {
+    pub version: String,
+    pub target: String,
+    pub archive_url: String,
+    pub checksum_url: String,
+    pub archive_kind: String,
+    pub strip_prefix: String,
+    pub go_relative_path: String,
+    pub bin_relative_path: String,
+    pub goroot_relative_path: String,
+}
+
 #[derive(Debug)]
 pub(super) struct GoPlugin {
     ba: Arc<BackendArg>,
@@ -33,6 +51,61 @@ impl GoPlugin {
         }
     }
 
+    fn binary_artifact(&self, version: &str, target: &PlatformTarget) -> (String, &'static str) {
+        let settings = Settings::get();
+        let platform = match target.os_name() {
+            "macos" => "darwin",
+            "linux" => "linux",
+            "windows" => "windows",
+            _ => "linux",
+        };
+        let arch = match target.arch_name() {
+            "x64" => "amd64",
+            "arm64" => "arm64",
+            "arm" => "armv6l",
+            "loongarch64" => "loong64",
+            "riscv64" => "riscv64",
+            other => other,
+        };
+        let ext = if target.os_name() == "windows" {
+            "zip"
+        } else {
+            "tar.gz"
+        };
+        (
+            format!(
+                "{}/go{}.{}-{}.{}",
+                settings.go.download_mirror, version, platform, arch, ext
+            ),
+            ext,
+        )
+    }
+
+    pub(super) fn embedding_archive_facts(
+        &self,
+        version: &str,
+        target: &PlatformTarget,
+        target_key: &str,
+    ) -> GoArchiveFacts {
+        let (archive_url, kind) = self.binary_artifact(version, target);
+        GoArchiveFacts {
+            version: version.into(),
+            target: target_key.into(),
+            checksum_url: format!("{archive_url}.sha256"),
+            archive_url,
+            archive_kind: kind.into(),
+            strip_prefix: GO_ARCHIVE_ROOT.into(),
+            go_relative_path: if target.os_name() == "windows" {
+                "bin/go.exe"
+            } else {
+                "bin/go"
+            }
+            .into(),
+            bin_relative_path: GO_BIN_DIRECTORY.into(),
+            goroot_relative_path: ".".into(),
+        }
+    }
+
     /// Check if a Go version string is valid (not "1" and not beta/rc)
     /// - "1" corresponds to the `go1` tag which has no installable download
     /// - beta/rc versions are pre-release and should be excluded by default
@@ -42,7 +115,7 @@ impl GoPlugin {
 
     // Represents go binary path
     fn go_bin(&self, tv: &ToolVersion) -> PathBuf {
-        tv.install_path().join("bin").join("go")
+        tv.install_path().join(GO_BIN_DIRECTORY).join("go")
     }
 
     // Represents GOPATH environment variable
@@ -61,7 +134,7 @@ impl GoPlugin {
 
     // Represents GOBIN environment variable
     fn gobin(&self, tv: &ToolVersion) -> PathBuf {
-        tv.install_path().join("bin")
+        tv.install_path().join(GO_BIN_DIRECTORY)
     }
 
     fn install_default_packages(
@@ -168,7 +241,10 @@ impl GoPlugin {
             )?;
         }
         file::remove_all(tv.install_path())?;
-        file::rename(tmp_extract_path.path().join("go"), tv.install_path())?;
+        file::rename(
+            tmp_extract_path.path().join(GO_ARCHIVE_ROOT),
+            tv.install_path(),
+        )?;
         Ok(())
     }
 
@@ -359,30 +435,7 @@ impl Backend for GoPlugin {
         tv: &ToolVersion,
         target: &PlatformTarget,
     ) -> Result<Option<String>> {
-        let settings = Settings::get();
-        let platform = match target.os_name() {
-            "macos" => "darwin",
-            "linux" => "linux",
-            "windows" => "windows",
-            _ => "linux",
-        };
-        let arch = match target.arch_name() {
-            "x64" => "amd64",
-            "arm64" => "arm64",
-            "arm" => "armv6l",
-            "loongarch64" => "loong64",
-            "riscv64" => "riscv64",
-            other => other,
-        };
-        let ext = if target.os_name() == "windows" {
-            "zip"
-        } else {
-            "tar.gz"
-        };
-        Ok(Some(format!(
-            "{}/go{}.{}-{}.{}",
-            settings.go.download_mirror, tv.version, platform, arch, ext
-        )))
+        Ok(Some(self.binary_artifact(&tv.version, target).0))
     }
 
     async fn resolve_lock_info(

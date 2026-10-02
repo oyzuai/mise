@@ -19,6 +19,14 @@ mod dotnet;
 mod elixir;
 mod erlang;
 mod go;
+pub use go::GoArchiveFacts;
+pub(crate) fn go_archive_facts(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> GoArchiveFacts {
+    go::GoPlugin::new().embedding_archive_facts(version, target, target_key)
+}
 mod java;
 mod node;
 pub use node::NodeArchiveFacts;

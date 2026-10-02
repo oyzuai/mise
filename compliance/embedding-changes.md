@@ -16,6 +16,7 @@ No dependency manifest or lockfile is changed by this embedding patch.
 | Frontend ownership | Use the caller's image identity and reject mise shim publication | Upstream exposes equivalent frontend control |
 | Verbatim PATH | Preserve duplicate entries when composing live shell state | Upstream offers equivalent lossless composition |
 | Node archive facts | Reuse the Node backend's artifact/mirror selection and native path helpers for explicit targets without installing or executing them | Upstream exposes an equivalent data-only target layout boundary |
+| Go archive facts | Share Go artifact/mirror selection with the backend's lock URL path and its archive-root extraction constant; expose fresh-archive layout facts without Git discovery or execution | Upstream exposes an equivalent data-only target layout boundary |
 
 The library-only `oyzu-embedding-check` example exercises initialization in fresh
 child processes with invalid ambient project/global configuration, absent and
@@ -69,3 +70,20 @@ Node is not admitted; for two versions and three targets it checks exact facts,
 upstream URL parity and zero extra transport calls. These fixture checks are not
 native archive-layout parity or real backend installation qualification. No
 dependency or license/notice file changes accompany this seam.
+
+`Session::go_archive_facts` uses the same bounded exact-stable-version and initial
+target validation as Node, while enforcing Go's own immutable session admission.
+The Go backend owns the fact type and `binary_artifact` calculation used by both
+its existing `get_tarball_url` and this interface. The `go` strip prefix is shared
+with upstream extraction. Results contain the archive and checksum-sidecar URLs,
+format, strip prefix, executable path, bin path and fresh-layout GOROOT path.
+Legacy nested installations and mutable GOPATH/package installation are not
+projected. The shared validator accepts full stable SemVer, so legacy archive
+versions written without a patch component are not exposed by this interface.
+
+A seventh isolated conformance scenario checks two Go versions across three
+targets, exact values, parity with the upstream artifact URL method, rejected
+versions/targets, separate Node/Go admission and zero transport callbacks. It
+does not use Go's Git discovery, download archives or run Go. Catalog membership,
+checksum authenticity, native archive layout/executable parity and broker route
+mapping remain qualification gates. No dependency or upstream notice changed.

@@ -43,6 +43,7 @@ fn main() -> Result<()> {
         "unadmitted",
         "node-denied",
         "backend",
+        "go-facts",
     ] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -80,6 +81,9 @@ fn main() -> Result<()> {
 
 fn child(scenario: &str, state: PathBuf) -> Result<()> {
     let mut input = options(state.clone())?;
+    if scenario == "go-facts" {
+        input.tools = BTreeSet::from(["go".into()]);
+    }
     if scenario == "node-denied" {
         input.tools.clear();
     }
@@ -99,6 +103,13 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if scenario == "go-facts" {
+        let calls = calls.clone();
+        input.transport = Some(Arc::new(move |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { eyre::bail!("Go archive facts must not acquire metadata") })
+        }));
+    }
     if scenario == "backend" {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |request| {
@@ -139,6 +150,20 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         let names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
         eyre::eyre!("{error}; isolated conformance child variable names: {names:?}")
     })?;
+    if scenario == "go-facts" {
+        tokio::runtime::Runtime::new()?.block_on(check_go_facts(&session))?;
+        ensure!(
+            calls.load(Ordering::SeqCst) == 0,
+            "Go facts acquired metadata"
+        );
+        return Ok(());
+    }
+    ensure!(
+        session
+            .go_archive_facts("1.24.13", "linux/amd64/gnu")
+            .is_err(),
+        "Go facts escaped session admission"
+    );
     if scenario == "node-denied" {
         ensure!(
             session
@@ -246,6 +271,105 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         );
         ensure!(calls.load(Ordering::SeqCst) == 0, "unexpected callback");
     }
+    Ok(())
+}
+
+async fn check_go_facts(session: &Session) -> Result<()> {
+    use mise::toolset::{ToolRequest, ToolSource, ToolVersion};
+    mise::config::settings::clear();
+    let settings = mise::config::Settings::get();
+    ensure!(
+        settings.enable_tools == Some(BTreeSet::from(["go".into()])) && !settings.go.skip_checksum,
+        "Go settings reload lost immutable admission or checksum defaults"
+    );
+    mise::backend::load_tools().await?;
+    let argument = Arc::new(mise::args::BackendArg::from("go"));
+    let backend =
+        mise::backend::get(&argument).ok_or_else(|| eyre::eyre!("core Go backend unavailable"))?;
+    for version in ["1.24.13", "1.25.2"] {
+        let tv = ToolVersion::new(
+            ToolRequest::new(argument.clone(), version, ToolSource::Argument)?,
+            version.into(),
+        );
+        for (target, native, suffix, kind, executable) in [
+            (
+                "linux/amd64/gnu",
+                "linux-x64",
+                "linux-amd64",
+                "tar.gz",
+                "bin/go",
+            ),
+            (
+                "darwin/arm64/native",
+                "macos-arm64",
+                "darwin-arm64",
+                "tar.gz",
+                "bin/go",
+            ),
+            (
+                "windows/amd64/msvc",
+                "windows-x64",
+                "windows-amd64",
+                "zip",
+                "bin/go.exe",
+            ),
+        ] {
+            let facts = session.go_archive_facts(version, target)?;
+            let url = format!("https://dl.google.com/go/go{version}.{suffix}.{kind}");
+            ensure!(
+                facts.version == version
+                    && facts.target == target
+                    && facts.archive_url == url
+                    && facts.checksum_url == format!("{url}.sha256")
+                    && facts.archive_kind == kind
+                    && facts.strip_prefix == "go"
+                    && facts.go_relative_path == executable
+                    && facts.bin_relative_path == "bin"
+                    && facts.goroot_relative_path == ".",
+                "incorrect Go archive facts: {facts:?}"
+            );
+            let platform = mise::backend::platform_target::PlatformTarget::new(
+                mise::platform::Platform::parse(native)?,
+            );
+            ensure!(
+                backend.get_tarball_url(&tv, &platform).await? == Some(facts.archive_url),
+                "Go facts differ from upstream artifact selection"
+            );
+        }
+    }
+    for version in [
+        "1.24",
+        "go1.24.13",
+        "latest",
+        "1.25.0-rc.1",
+        "1.24.13+build",
+        "../../1.24.13",
+    ] {
+        ensure!(
+            session
+                .go_archive_facts(version, "linux/amd64/gnu")
+                .is_err(),
+            "nonexact Go version accepted"
+        );
+    }
+    for target in [
+        "linux/arm64/gnu",
+        "linux/amd64/musl",
+        "darwin/amd64/native",
+        "windows/arm64/msvc",
+        "linux-x64",
+    ] {
+        ensure!(
+            session.go_archive_facts("1.24.13", target).is_err(),
+            "unqualified Go target accepted"
+        );
+    }
+    ensure!(
+        session
+            .node_archive_facts("22.15.0", "linux/amd64/gnu")
+            .is_err(),
+        "Node escaped Go-only admission"
+    );
     Ok(())
 }
 
