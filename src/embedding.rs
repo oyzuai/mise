@@ -30,7 +30,7 @@ pub struct Session {
 
 pub use crate::plugins::core::NodeArchiveFacts;
 pub use crate::plugins::core::NodeArchiveMetadata;
-pub use crate::plugins::core::{GoArchiveFacts, GoArchiveMetadata};
+pub use crate::plugins::core::{GoArchiveFacts, GoArchiveMetadata, GoVersionResolution};
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
 
@@ -161,17 +161,17 @@ impl Session {
         crate::plugins::core::resolve_node_version(&self.config, request, native_constraints).await
     }
 
-    /// Resolve Go from the admitted upstream tag catalog with all constraints.
-    /// Embedded Go uses bounded supplied HTTP pagination, never git execution.
+    /// Resolve Go from the official release JSON catalog with all constraints.
+    /// Returns the exact supplied catalog digest; never uses Git execution.
     /// Only cataloged canonical stable versions are returned; archive availability
     /// and publisher verification remain separate operations.
     pub async fn resolve_go_version(
         &self,
         request: &str,
         native_constraints: &[String],
-    ) -> Result<String> {
+    ) -> Result<GoVersionResolution> {
         ensure!(self.tools.contains("go"), "Go backend is not admitted");
-        crate::plugins::core::resolve_go_version(&self.config, request, native_constraints).await
+        crate::plugins::core::resolve_go_version(request, native_constraints).await
     }
 
     /// Project names from this revision's baked registry onto admitted core

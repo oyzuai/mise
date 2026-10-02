@@ -6,7 +6,7 @@ use crate::toolset::{ToolRequest, ToolSource};
 use eyre::{Result, ensure};
 use std::sync::Arc;
 
-enum Selector {
+pub(super) enum Selector {
     Range(String),
     Version(String),
 }
@@ -17,13 +17,31 @@ pub(super) async fn resolve_version(
     request: &str,
     constraints: &[String],
 ) -> Result<String> {
+    let selectors = selectors(backend, request, constraints)?;
+    select(
+        backend,
+        backend.list_remote_versions(config).await?,
+        selectors,
+    )
+}
+
+pub(super) fn selectors(
+    backend: &dyn Backend,
+    request: &str,
+    constraints: &[String],
+) -> Result<Vec<Selector>> {
     ensure!(constraints.len() <= 256, "too many tool constraints");
-    // Validate every input before any metadata acquisition or cache access.
-    let selectors = std::iter::once(request)
+    std::iter::once(request)
         .chain(constraints.iter().map(String::as_str))
         .map(|query| selector(backend, query))
-        .collect::<Result<Vec<_>>>()?;
-    let mut versions = backend.list_remote_versions(config).await?;
+        .collect()
+}
+
+pub(super) fn select(
+    backend: &dyn Backend,
+    mut versions: Vec<String>,
+    selectors: Vec<Selector>,
+) -> Result<String> {
     ensure!(
         versions.len() <= 100_000 && versions.iter().all(|v| v.len() <= 128),
         "tool catalog exceeds embedding selection limits"

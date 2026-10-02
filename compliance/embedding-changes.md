@@ -144,18 +144,18 @@ A thirteenth fresh-process scenario covers three targets, normalization, malform
 and oversized checksums and invalid pre-acquisition inputs; existing scenarios
 also verify backend admission and supplied-transport denial.
 
-`Session::resolve_go_version` reuses the shared admitted stable-version selector
-now owned by `src/plugins/core/embedding_selection.rs`; Node keeps the same
-selection semantics. The selector validates inputs before metadata, intersects
-constraints through upstream range/prefix matching and requires catalog membership.
-Embedded Go uses the existing GitHub tag parser and HTTP transport with bounded
-complete pagination instead of its ordinary Git subprocess path. Its existing Go
-prefix filtering, prerelease rejection, deduplication and version ordering remain.
-The new explicit bounded GitHub API permits at most 1,000 pages and 100,000 tags,
-rejects repeated URLs and adds same-origin/credential checks to the bounded path. Ordinary
-upstream tag callers retain their previous behavior. Transport byte/time bounds
-remain the broker's responsibility. No commit-date fanout is introduced.
-Six fresh-process scenarios cover selection/constraints/cache, missing transport,
-pagination cycles, foreign next-page origins and both numeric limits. Exact archive availability, source
-verification, native Go directive discovery and production worker wiring remain
-unimplemented. No dependency, registry data or preserved notice changed.
+`Session::resolve_go_version` reuses the shared admitted selector owned by
+`src/plugins/core/embedding_selection.rs`; Node keeps its selection semantics.
+Go's `go/embedding.rs` owns the bounded official Go release JSON adapter specified
+by OEP-0003. Selection returns both version and exact UTF-8 catalog SHA-256.
+The earlier candidate GitHub-tag implementation was removed to correct its
+mismatch with that requirement; ordinary upstream Go/GitHub behavior is restored.
+
+The adapter rejects malformed/duplicate release records, text over 16 MiB, more
+than 100,000 releases and oversized version strings. It excludes unstable and
+noncanonical stable versions, reuses the upstream Go comparator and requires exact
+pin membership. Selectors are checked before acquisition; transport owns streaming
+limits and deadlines. Seven scenarios cover selection/cache/digest, missing metadata,
+duplicate/malformed/invalid-UTF-8 records and both catalog limits. Artifact-file parity, native
+directive discovery, publisher verification and production wiring remain unfinished.
+No dependency, registry data or preserved notice changed.

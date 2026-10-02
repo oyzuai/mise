@@ -453,61 +453,19 @@ pub async fn list_tags_from_url(api_url: &str, repo: &str) -> Result<Vec<String>
 /// tests can exercise the pagination loop: the env var is a process-wide `Lazy` that other
 /// modules' tests have already forced by the time this one runs.
 async fn list_tags_(api_url: &str, repo: &str, list_all: bool) -> Result<Vec<String>> {
-    list_tags_with_limits(api_url, repo, list_all, None).await
-}
-
-/// Complete tag names through the existing parser/HTTP client, with finite
-/// pagination. No commit-date fanout or Git subprocess. The transport still owns
-/// response-byte and time limits. Used by admitted embedded catalog consumers.
-pub async fn list_tags_bounded(repo: &str) -> Result<Vec<String>> {
-    list_tags_with_limits(API_URL, repo, true, Some((1000, 100_000))).await
-}
-
-async fn list_tags_with_limits(
-    api_url: &str,
-    repo: &str,
-    list_all: bool,
-    limits: Option<(usize, usize)>,
-) -> Result<Vec<String>> {
     let mut url = format!("{api_url}/repos/{repo}/tags?per_page=100");
     let headers = get_headers(&url)?;
     let (mut tags, mut headers) = crate::http::HTTP_FETCH
         .json_headers_with_headers::<Vec<GithubTag>, _>(&url, &headers)
         .await?;
 
-    let mut pages = 1;
-    let mut visited = std::collections::HashSet::from([url.clone()]);
-    if let Some((_, max_tags)) = limits {
-        eyre::ensure!(tags.len() <= max_tags, "tag catalog exceeds limit");
-    }
     if list_all {
         while let Some(next) = next_page(&headers) {
             url = crate::http::resolve_pagination_url(&url, &next)?;
-            if let Some((max_pages, _)) = limits {
-                let parsed = url::Url::parse(&url)?;
-                eyre::ensure!(
-                    parsed.origin() == url::Url::parse(api_url)?.origin()
-                        && parsed.username().is_empty()
-                        && parsed.password().is_none(),
-                    "tag pagination changed origin or introduced credentials"
-                );
-                url = parsed.to_string();
-                eyre::ensure!(
-                    pages < max_pages && visited.insert(url.clone()),
-                    "tag pagination exceeds limit or repeats"
-                );
-            }
-            pages += 1;
             headers = get_headers(&url)?;
             let (more, h) = crate::http::HTTP_FETCH
                 .json_headers_with_headers::<Vec<GithubTag>, _>(&url, &headers)
                 .await?;
-            if let Some((_, max_tags)) = limits {
-                eyre::ensure!(
-                    more.len() <= max_tags.saturating_sub(tags.len()),
-                    "tag catalog exceeds limit"
-                );
-            }
             tags.extend(more);
             headers = h;
         }

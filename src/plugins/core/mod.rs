@@ -20,7 +20,7 @@ mod elixir;
 mod embedding_selection;
 mod erlang;
 mod go;
-pub use go::{GoArchiveFacts, GoArchiveMetadata};
+pub use go::{GoArchiveFacts, GoArchiveMetadata, GoVersionResolution};
 pub(crate) async fn go_archive_metadata(
     version: &str,
     target: &crate::backend::platform_target::PlatformTarget,
@@ -58,11 +58,12 @@ pub(crate) async fn resolve_node_version(
         .await
 }
 pub(crate) async fn resolve_go_version(
-    config: &Arc<crate::config::Config>,
     request: &str,
     constraints: &[String],
-) -> eyre::Result<String> {
-    embedding_selection::resolve_version(&go::GoPlugin::new(), config, request, constraints).await
+) -> eyre::Result<GoVersionResolution> {
+    go::GoPlugin::new()
+        .embedding_resolve_version(request, constraints)
+        .await
 }
 pub(crate) fn node_archive_facts(
     version: &str,
