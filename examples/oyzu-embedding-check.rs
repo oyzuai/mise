@@ -122,7 +122,13 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
             })
         }));
     }
-    let session = Session::initialize(input)?;
+    let session = Session::initialize(input).map_err(|error| {
+        // This child was created with env_clear and the fixture's explicit
+        // allowlist. Report names only to diagnose native runtime additions;
+        // never print values or the parent/developer environment.
+        let names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
+        eyre::eyre!("{error}; isolated conformance child variable names: {names:?}")
+    })?;
     mise::config::settings::clear();
     let settings = mise::config::Settings::get();
     ensure!(
