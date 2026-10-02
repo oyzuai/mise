@@ -100,7 +100,8 @@ not compile, execute a backend, fetch missing packages or change the lockfile.
 The other supported target filters are `aarch64-apple-darwin` and
 `x86_64-pc-windows-msvc`. A target filter is not native execution evidence.
 The embedding workflow collects one report per target after the native library
-checks, explicitly provisioning locked target metadata with `cargo fetch` before
+checks, explicitly provisioning the same locked, target-filtered Cargo metadata
+query and feature set before
 offline collection under Rust 1.95.0. Provisioning can use the network; collection
 cannot. It retains reports
 as `cargo-evidence-<target>-<commit>` artifacts for 30 days. Download and preserve
