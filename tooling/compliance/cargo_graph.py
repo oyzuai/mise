@@ -95,7 +95,7 @@ def notice_digest(path):
     return guard.digest(data)
 
 
-def inventory(metadata, root, target, revision, lock_bytes):
+def inventory(metadata, root, target, revision, lock_bytes, package_roots=None):
     root = root.resolve()
     packages = {p["id"]:p for p in metadata["packages"]}
     nodes = {n["id"]:n for n in metadata["resolve"]["nodes"]}
@@ -124,6 +124,8 @@ def inventory(metadata, root, target, revision, lock_bytes):
     records = []
     for key in sorted(selected, key=identities.get):
         package = packages[key]
+        if package_roots is not None:
+            package_roots[identities[key]] = Path(package["manifest_path"]).resolve().parent
         identity = (package["name"], package["version"], package.get("source"))
         if identity not in checksums:
             raise ValueError("selected package is absent from Cargo.lock")
@@ -150,7 +152,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", choices=TARGETS, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--notice-bundle", type=Path)
     args = parser.parse_args()
+    if args.notice_bundle and args.notice_bundle.resolve() == args.output.resolve():
+        parser.error("notice bundle and report need different paths")
     root = Path(__file__).resolve().parents[2]
     revision = guard.git(root,"rev-parse","HEAD").decode().strip()
     before = (root/"Cargo.lock").read_bytes()
@@ -166,11 +171,17 @@ def main():
         metadata = json.load(output)
     if before != (root/"Cargo.lock").read_bytes():
         raise ValueError("Cargo.lock changed during evidence collection")
-    report = inventory(metadata,root,args.target,revision,before)
+    roots = {}
+    report = inventory(metadata,root,args.target,revision,before,package_roots=roots)
     report["tracked_worktree_changes"] = bool(guard.git(root,"diff","--name-only","HEAD"))
     report["collector_sha256_lf"] = guard.digest(Path(__file__).read_bytes())
     report["notice_guard_sha256_lf"] = guard.digest(Path(__file__).with_name("check.py").read_bytes())
-    args.output.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
+    report["notice_bundle_collector_sha256_lf"] = guard.digest(Path(__file__).with_name("cargo_notices.py").read_bytes())
+    report_bytes = (json.dumps(report,indent=2)+"\n").encode("utf-8")
+    if args.notice_bundle:
+        from cargo_notices import write_bundle
+        write_bundle(args.notice_bundle, report, report_bytes, roots, guard.digest)
+    args.output.write_bytes(report_bytes)
     print(json.dumps({"package_count":report["package_count"],"legal_approval":False,"release_ready":False}))
 
 

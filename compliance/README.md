@@ -91,7 +91,7 @@ unaudited engineering outputs, not compliance-certified product releases.
 candidate with default features disabled and `rustls,vfox/vendored-lua` enabled:
 
 ```sh
-python tooling/compliance/cargo_graph.py --target x86_64-unknown-linux-gnu --output cargo-evidence.json
+python tooling/compliance/cargo_graph.py --target x86_64-unknown-linux-gnu --output cargo-evidence.json --notice-bundle cargo-notices.zip
 ```
 
 Python 3.11+, Git, the candidate's Rust compiler and a previously provisioned Cargo
@@ -104,13 +104,39 @@ checks, explicitly provisioning the same locked, target-filtered Cargo metadata
 query and feature set before
 offline collection under Rust 1.95.0. Provisioning can use the network; collection
 cannot. It retains reports
-as `cargo-evidence-<target>-<commit>` artifacts for 30 days. Download and preserve
-the reviewed reports outside this expiring CI storage before any release review.
+as `cargo-evidence-<target>-<commit>` artifacts for 30 days, including the report
+and original observed notice bytes. Download and preserve the reviewed evidence
+outside this expiring CI storage before any release review.
 Collection failure fails that job; a successful upload is not legal approval or
 proof of complete artifact obligations. Changes to the collector rerun this
 matrix as well as the compliance guard.
 Missing cached metadata is an error: provision it separately and repeat the
-command. The output path must have an existing parent and is overwritten.
+command. The report path must have an existing parent and is overwritten.
+The optional `--notice-bundle` path must be different, have an existing parent
+and not already exist; it is created exclusively and never replaces another file.
+
+The ZIP contains the exact UTF-8/LF `cargo-evidence.json`, original notice bytes
+under package-identity-hash directories and `INDEX.json`. The index binds the
+report's raw SHA-256, each notice's package identity/original relative path,
+raw SHA-256, LF-normalized SHA-256 and byte size. It explicitly lists packages
+with no observed notice. Original line endings and copyright text are untouched.
+Fixed archive metadata and uncompressed entries make repeated output identical
+for identical report/notice bytes. A different host's metadata or working state
+can legitimately change its report and therefore its archive.
+
+Bundle collection rechecks notice hashes against the report and rejects changed,
+redirected, nonregular or unsafe-path inputs. It limits notices to 20,000 files,
+2 MiB each and 256 MiB total, plus 64 MiB each for report and index. Ordinary
+failure removes this operation's partial archive; an existing destination stays
+untouched. The report is written only after successful requested bundling. This
+operates on a trusted provisioned package cache, not a hostile-filesystem sandbox.
+The notice-bundle collector hash is also recorded in the report.
+
+This archive is review evidence, not a release notice bundle or SBOM. It does not
+select license alternatives, approve obligations, recover absent texts, include
+installed tools' licenses or fulfill required source distribution. Both report
+and index remain explicitly unapproved. Omitting `--notice-bundle` retains the
+report-only operation.
 
 The report follows normal and build dependency edges from mise, excludes edges
 that are exclusively development dependencies, retains Cargo's declared license
