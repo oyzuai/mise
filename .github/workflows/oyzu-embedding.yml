@@ -49,11 +49,13 @@ jobs:
           key: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
       - name: Check embedding formatting
-        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs src/plugins/core/go.rs src/plugins/core/go/embedding.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs crates/mise-util/src/http.rs src/plugins/core/java.rs examples/oyzu-embedding-check.rs examples/oyzu-embedding-check/go_replay.rs examples/oyzu-embedding-check/java_replay.rs
+        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs src/plugins/core/go.rs src/plugins/core/go/embedding.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs crates/mise-util/src/http.rs src/plugins/core/java.rs src/plugins/core/python.rs examples/oyzu-embedding-check.rs examples/oyzu-embedding-check/go_replay.rs examples/oyzu-embedding-check/java_replay.rs
       - name: Check shared metadata utility library
         run: cargo +1.95.0 clippy --locked -p mise-util --lib --no-default-features --features rustls -- -D warnings
       - name: Check bounded metadata response collection
         run: cargo +1.95.0 test --locked -p mise-util --lib --no-default-features --features rustls metadata_bounds_tests
+      - name: Check bounded Python catalog decoding
+        run: cargo +1.95.0 test --locked --lib --no-default-features --features rustls,vfox/vendored-lua python_catalog_gzip_is_bounded_and_validated
       - name: Check library and conformance target
         run: cargo +1.95.0 clippy --locked --lib --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua -- -D warnings
       - name: Run fresh-process boundary and real backend parser checks

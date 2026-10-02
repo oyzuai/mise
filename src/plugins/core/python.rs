@@ -30,6 +30,22 @@ use tokio::sync::Mutex;
 use versions::Versioning;
 use xx::regex;
 
+// Bound both HTTP bytes and the application-level gzip expansion before selection.
+const PYTHON_CATALOG_LIMIT: usize = 16 * 1024 * 1024;
+
+fn decode_python_catalog(bytes: &[u8], limit: usize) -> eyre::Result<String> {
+    let probe_limit = u64::try_from(limit)?
+        .checked_add(1)
+        .ok_or_else(|| eyre!("python catalog limit overflow"))?;
+    let mut decoder = GzDecoder::new(bytes).take(probe_limit);
+    let mut raw = String::new();
+    decoder.read_to_string(&mut raw)?;
+    if raw.len() > limit {
+        bail!("python catalog exceeds decoded byte limit");
+    }
+    Ok(raw)
+}
+
 const ATTESTATION_HELP: &str = "To disable attestation verification, set MISE_PYTHON_GITHUB_ATTESTATIONS=false\n\
     or add `python.github_attestations = false` under [settings] in mise.toml";
 const PBS_RELEASE_DOWNLOAD_URL: &str =
@@ -296,11 +312,12 @@ impl PythonPlugin {
                 let settings = Settings::get();
                 let url_path = python_precompiled_url_path(&settings);
                 let rsp = HTTP_FETCH
-                    .get_bytes(format!("https://mise-versions.jdx.dev/tools/{url_path}"))
+                    .get_bytes_bounded(
+                        format!("https://mise-versions.jdx.dev/tools/{url_path}"),
+                        PYTHON_CATALOG_LIMIT,
+                    )
                     .await?;
-                let mut decoder = GzDecoder::new(rsp.as_ref());
-                let mut raw = String::new();
-                decoder.read_to_string(&mut raw)?;
+                let raw = decode_python_catalog(&rsp, PYTHON_CATALOG_LIMIT)?;
                 let platform = python_precompiled_platform();
                 let flavor = settings.python.precompiled_flavor.clone();
                 // order by version, whether it is a release candidate, date, and in the preferred order of install types
@@ -808,11 +825,12 @@ impl PythonPlugin {
         let platform = format!("{arch}-{os}");
         let url_path = format!("python-precompiled-{arch}-{os}.gz");
         let rsp = HTTP_FETCH
-            .get_bytes(format!("https://mise-versions.jdx.dev/tools/{url_path}"))
+            .get_bytes_bounded(
+                format!("https://mise-versions.jdx.dev/tools/{url_path}"),
+                PYTHON_CATALOG_LIMIT,
+            )
             .await?;
-        let mut decoder = GzDecoder::new(rsp.as_ref());
-        let mut raw = String::new();
-        decoder.read_to_string(&mut raw)?;
+        let raw = decode_python_catalog(&rsp, PYTHON_CATALOG_LIMIT)?;
 
         let flavor = settings.python.precompiled_flavor.clone();
 
@@ -1833,6 +1851,30 @@ mod tests {
 
         let opts = opts_with("patch_sysconfig", "true");
         assert!(PythonOptions::new(&opts).lockfile_options().is_empty());
+    }
+
+    #[test]
+    fn python_catalog_gzip_is_bounded_and_validated() {
+        use std::io::Write;
+        let gzip = |bytes: &[u8]| {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+        let catalog = gzip(b"cpython-example\n");
+        assert_eq!(
+            decode_python_catalog(&catalog, 16).unwrap(),
+            "cpython-example\n"
+        );
+        assert!(decode_python_catalog(&catalog, 15).is_err());
+        assert!(decode_python_catalog(&gzip(&vec![b'x'; 65536]), 1024).is_err());
+        assert!(decode_python_catalog(&gzip(&[0xff]), 16).is_err());
+        assert!(decode_python_catalog(&catalog[..catalog.len() - 1], 16).is_err());
+        let mut corrupt = catalog;
+        let index = corrupt.len() - 8;
+        corrupt[index] ^= 1;
+        assert!(decode_python_catalog(&corrupt, 16).is_err());
     }
 
     #[test]

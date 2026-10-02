@@ -279,3 +279,28 @@ targets, conflicts, missing versions, unsupported selectors/targets and excessiv
 constraints. Invalid input makes no transport calls. Native CI for this new seam
 is pending. Compliance inventory is unchanged; 24 tests pass with two Windows
 symlink skips. This does not qualify the remaining Java admission obligations.
+
+### Python precompiled catalog bounds (qualification in progress)
+
+Both precompiled catalog fetch paths now reuse the bounded HTTP reader with a
+16 MiB body cap. The application-level gzip decoder reads at most 16 MiB plus
+one overflow-probe byte and rejects overflow before version selection. Invalid
+UTF-8, truncated gzip and checksum errors fail the fetch. Existing platform,
+flavor, ordering and locked-artifact selection logic is unchanged. This bounds
+catalog input, not total process memory or archive installation size.
+
+The Linux library regression passes exact-limit acceptance, overflow, compressible
+expansion, invalid UTF-8, truncation and checksum corruption. Scoped strict library
+and embedding-example Clippy and Python source formatting pass. The three-host
+embedding workflow now runs this regression and includes Python in formatting
+checks; native CI results are still pending. This is not Python backend admission
+or release approval. No dependency, source pin or license/notice file changed.
+
+On 2026-10-02, bounded read-only observations of the upstream catalogs for
+x86_64 Linux GNU, aarch64 macOS and x86_64 Windows MSVC measured respectively
+9,402/195,798, 9,146/181,436 and 7,913/158,412 compressed/decoded bytes. These
+observations used the explicit Oyzu metadata qualification User-Agent and are
+size compatibility evidence only, not retained catalog provenance or parser replay.
+
+All 22 existing fresh-process embedding harness scenarios also pass on Linux
+with this change. The run builds the library/example only, not a mise executable.
