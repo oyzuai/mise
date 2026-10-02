@@ -30,6 +30,7 @@ pub struct Session {
 
 pub use crate::plugins::core::GoArchiveFacts;
 pub use crate::plugins::core::NodeArchiveFacts;
+pub use crate::plugins::core::NodeArchiveMetadata;
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
 
@@ -197,6 +198,18 @@ impl Session {
     pub fn node_archive_facts(&self, version: &str, target: &str) -> Result<NodeArchiveFacts> {
         let target_platform = self.archive_target("node", version, target)?;
         crate::plugins::core::node_archive_facts(version, &target_platform, target)
+    }
+
+    /// Require a unique, syntactically valid publisher-declared SHA-256 for the
+    /// exact target archive, through supplied transport/private metadata cache.
+    /// No archive bytes are acquired and no signature or source trust is verified.
+    pub async fn node_archive_metadata(
+        &self,
+        version: &str,
+        target: &str,
+    ) -> Result<NodeArchiveMetadata> {
+        let platform = self.archive_target("node", version, target)?;
+        crate::plugins::core::node_archive_metadata(version, &platform, target).await
     }
 
     /// Compute target-aware Go archive facts without Git discovery, acquisition,

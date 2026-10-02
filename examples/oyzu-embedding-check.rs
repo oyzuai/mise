@@ -48,6 +48,7 @@ fn main() -> Result<()> {
         "catalog",
         "node-resolve",
         "node-resolve-offline",
+        "node-metadata",
     ] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -113,6 +114,37 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if scenario == "node-metadata" {
+        let calls = calls.clone();
+        input.transport = Some(Arc::new(move |request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let body = match request.url.as_str() {
+                    "https://nodejs.org/dist/v22.14.0/SHASUMS256.txt" => format!(
+                        "{}  node-v22.14.0-linux-x64.tar.gz\n{} *node-v22.14.0-darwin-arm64.tar.gz\n{} *node-v22.14.0-win-x64.zip\n",
+                        "A".repeat(64),
+                        "b".repeat(64),
+                        "c".repeat(64)
+                    ),
+                    "https://nodejs.org/dist/v22.15.0/SHASUMS256.txt" => {
+                        format!("{}  node-v22.15.0-linux-x64.tar.gz\n", "d".repeat(64))
+                    }
+                    "https://nodejs.org/dist/v24.1.0/SHASUMS256.txt" => {
+                        "invalid node-v24.1.0-linux-x64.tar.gz\n".into()
+                    }
+                    "https://nodejs.org/dist/v24.2.0/SHASUMS256.txt" => format!(
+                        "{} node-v24.2.0-linux-x64.tar.gz\n{} node-v24.2.0-linux-x64.tar.gz\n",
+                        "a".repeat(64),
+                        "b".repeat(64)
+                    ),
+                    _ => eyre::bail!("unexpected Node archive metadata route"),
+                };
+                Ok(reqwest::Response::from(
+                    http::Response::builder().status(200).body(body)?,
+                ))
+            })
+        }));
+    }
     if scenario == "go-facts" {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |_| {
@@ -185,12 +217,22 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         tokio::runtime::Runtime::new()?.block_on(check_node_resolution(&session, calls))?;
         return Ok(());
     }
+    if scenario == "node-metadata" {
+        tokio::runtime::Runtime::new()?.block_on(check_node_metadata(&session, calls))?;
+        return Ok(());
+    }
     if scenario == "node-resolve-offline" {
         ensure!(
             tokio::runtime::Runtime::new()?
                 .block_on(session.resolve_node_version("22.14.0", &[]))
                 .is_err(),
             "exact pin bypassed absent metadata transport"
+        );
+        ensure!(
+            tokio::runtime::Runtime::new()?
+                .block_on(session.node_archive_metadata("22.14.0", "linux/amd64/gnu"))
+                .is_err(),
+            "archive metadata bypassed absent transport"
         );
         return Ok(());
     }
@@ -242,6 +284,12 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         "Go facts escaped session admission"
     );
     if scenario == "node-denied" {
+        ensure!(
+            tokio::runtime::Runtime::new()?
+                .block_on(session.node_archive_metadata("22.14.0", "linux/amd64/gnu"))
+                .is_err(),
+            "Node metadata escaped session admission"
+        );
         ensure!(
             tokio::runtime::Runtime::new()?
                 .block_on(session.resolve_node_version("22", &[]))
@@ -456,6 +504,92 @@ async fn check_go_facts(session: &Session) -> Result<()> {
             .node_archive_facts("22.15.0", "linux/amd64/gnu")
             .is_err(),
         "Node escaped Go-only admission"
+    );
+    Ok(())
+}
+
+async fn check_node_metadata(session: &Session, calls: Arc<AtomicUsize>) -> Result<()> {
+    use mise_util::hash::{parse_sha256sums_checked, parse_shasums};
+    let hash = "a".repeat(64);
+    for text in [
+        "no-fields".to_string(),
+        "invalid file".into(),
+        format!("{hash} *"),
+        format!("{hash} file extra"),
+        format!("{hash} file\n{hash} file\n"),
+        format!("{hash} file\0"),
+        " ".repeat(8 * 1024 * 1024 + 1),
+        (0..4097)
+            .map(|i| format!("{hash} file-{i}\n"))
+            .collect::<String>(),
+    ] {
+        ensure!(
+            parse_sha256sums_checked(&text).is_err(),
+            "malformed or oversized manifest accepted"
+        );
+    }
+    let legacy = parse_shasums("old file ignored\nnew *file\ninvalid-line\n");
+    ensure!(
+        legacy.get("file").map(String::as_str) == Some("new"),
+        "legacy parser behavior changed"
+    );
+    ensure!(
+        session
+            .node_archive_metadata("22", "linux/amd64/gnu")
+            .await
+            .is_err(),
+        "nonexact version accepted"
+    );
+    ensure!(
+        session
+            .node_archive_metadata("22.14.0", "linux/arm64/gnu")
+            .await
+            .is_err(),
+        "unsupported target accepted"
+    );
+    ensure!(
+        calls.load(Ordering::SeqCst) == 0,
+        "invalid inputs fetched metadata"
+    );
+    for (target, expected) in [
+        ("linux/amd64/gnu", 'a'),
+        ("darwin/arm64/native", 'b'),
+        ("windows/amd64/msvc", 'c'),
+    ] {
+        let metadata = session.node_archive_metadata("22.14.0", target).await?;
+        ensure!(
+            metadata.declared_sha256 == format!("sha256:{}", expected.to_string().repeat(64)),
+            "target checksum mismatch"
+        );
+        ensure!(
+            serde_json::to_value(metadata.archive)?
+                == serde_json::to_value(session.node_archive_facts("22.14.0", target)?)?,
+            "target archive facts differ"
+        );
+    }
+    ensure!(
+        calls.load(Ordering::SeqCst) == 1,
+        "same-version targets did not reuse manifest cache"
+    );
+    ensure!(
+        session
+            .node_archive_metadata("22.15.0", "windows/amd64/msvc")
+            .await
+            .is_err(),
+        "missing target checksum accepted"
+    );
+    for version in ["24.1.0", "24.2.0"] {
+        ensure!(
+            session
+                .node_archive_metadata(version, "linux/amd64/gnu")
+                .await
+                .is_err(),
+            "invalid publisher metadata accepted"
+        );
+    }
+    ensure!(
+        calls.load(Ordering::SeqCst) == 4,
+        "unexpected archive or fallback acquisition"
     );
     Ok(())
 }

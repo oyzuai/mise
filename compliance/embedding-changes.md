@@ -120,3 +120,15 @@ lock authoring and the other backends' selection remain separate responsibilitie
 Two fresh-process scenarios exercise supplied-catalog selection and no-transport
 denial; existing empty admission also rejects this operation. Original notices
 are unchanged and no dependency or registry data is added.
+
+`Session::node_archive_metadata` binds the existing target archive facts to a
+publisher-declared checksum entry. Node's existing checksum fetch path is shared
+with the embedding adapter. The shared hash module now offers bounded checked
+SHA-256 manifest decoding, reusing the legacy parser's field splitting while
+rejecting duplicate names, malformed hashes, extra fields and oversized input.
+Legacy parser tolerance remains unchanged. The returned checksum is explicitly
+declared metadata, not signature verification, content verification or authority.
+Missing target entries fail without source compilation or another target fallback.
+A twelfth fresh-process scenario covers three targets, manifest cache reuse,
+malformed/ambiguous/missing entries and parser bounds; existing no-transport and
+admission scenarios cover the new operation. No dependency or notice changed.

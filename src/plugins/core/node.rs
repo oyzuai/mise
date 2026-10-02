@@ -30,6 +30,7 @@ use url::Url;
 use xx::regex;
 
 mod embedding;
+pub use embedding::NodeArchiveMetadata;
 
 /// Upstream Node archive/layout facts, not a verified or admitted installation
 /// plan. The supervisor must obtain exact bytes, size, publisher evidence and
@@ -1004,11 +1005,15 @@ impl NodePlugin {
         version: &str,
         filename: &str,
     ) -> Result<Option<String>> {
-        let shasums_url = mirror.join(&format!("v{version}/SHASUMS256.txt"))?;
-        let shasums_content = HTTP.get_text_cached(shasums_url.as_str()).await?;
+        let shasums_content = self.shasums(mirror, version).await?;
         Ok(hash::parse_shasums(&shasums_content)
             .get(filename)
             .map(|shasum| format!("sha256:{shasum}")))
+    }
+
+    async fn shasums(&self, mirror: &Url, version: &str) -> Result<String> {
+        let url = mirror.join(&format!("v{version}/SHASUMS256.txt"))?;
+        HTTP.get_text_cached(url.as_str()).await
     }
 
     /// Map OS name from Platform to Node.js convention

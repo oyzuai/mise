@@ -29,7 +29,16 @@ pub(crate) fn go_archive_facts(
 }
 mod java;
 mod node;
-pub use node::NodeArchiveFacts;
+pub use node::{NodeArchiveFacts, NodeArchiveMetadata};
+pub(crate) async fn node_archive_metadata(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> eyre::Result<NodeArchiveMetadata> {
+    node::NodePlugin::new()
+        .embedding_archive_metadata(version, target, target_key)
+        .await
+}
 pub(crate) async fn resolve_node_version(
     config: &Arc<crate::config::Config>,
     request: &str,
