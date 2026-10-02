@@ -333,3 +333,22 @@ The debug `mise` binary is already on PATH. Prefer `mise run …` for project ta
 - Isolated e2e uses `env -i` and a fake `HOME`, so the agent's mise shims are not on PATH. Tests install their own tools. Host packages (zsh, fish, direnv, python3, jq, git) still need to be on `/usr/bin`
 - If GitHub API calls 429, run `export GITHUB_TOKEN="$(gh auth token)"; export MISE_GITHUB_TOKEN="$GITHUB_TOKEN"`
 - A leftover `/tmp/mise.toml` will fail the harness; remove it if that error appears
+
+## Oyzu fork compliance rules (apply to all subdirectories)
+
+Follow [the compliance policy](compliance/README.md) for every third-party import,
+dependency change, license/notice edit and distribution. Preserve all upstream
+copyright and license notices, including separately licensed subdirectories.
+Do not infer that mise's root MIT license covers every dependency or installed tool.
+The initial technical reviewer is @micahlmartin; legal approval remains separate.
+AI may collect evidence but must not approve its own exceptions, submit a human's
+approval, fabricate review records, remove notices or weaken a failed check.
+Run `python tooling/compliance/check.py` and the guard's regression tests.
+Updating the factual baseline does not approve a component or release.
+
+This fork is being prepared for Oyzu library reuse. Do not build, bundle or invoke
+a separate mise executable for this compliance work. Inherited automation is
+preserved under `.github/upstream-workflows/` and is inactive; restoring publishing
+or importing third-party implementation requires the recorded compliance gates.
+These fork rules supplement the upstream guide without changing its notices or
+claiming that an upstream policy is a copyright-license condition.
