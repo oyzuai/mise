@@ -81,7 +81,7 @@ impl Session {
             options
                 .tools
                 .iter()
-                .all(|tool| matches!(tool.as_str(), "node" | "go" | "java" | "python")),
+                .all(|tool| matches!(tool.as_str(), "node" | "go" | "java" | "python" | "rust")),
             "embedding tool is not admitted"
         );
         mise_util::embedding::initialize(mise_util::embedding::Context {
@@ -112,6 +112,8 @@ impl Session {
         let tools = options.tools;
         defaults.enable_tools = Some(tools.clone());
         defaults.disable_backends = vec!["asdf".into(), "vfox".into()];
+        defaults.rust.cargo_home = Some(options.state.join("cargo"));
+        defaults.rust.rustup_home = Some(options.state.join("rustup"));
         defaults.node.compile = Some(false);
         defaults.node.corepack = false;
         defaults.node.npm_shim = false;
@@ -142,6 +144,79 @@ impl Session {
             config: Config::for_embedding()?,
             tools,
         })
+    }
+
+    /// Run the upstream Rust installer in embedding-private homes. Exact stable
+    /// versions only; rustup owns installation. Its subprocess downloads use the
+    /// normal public route, so the host must not admit this in enforced mode.
+    /// Returns the installed compiler sysroot; caller owns durable publication.
+    pub async fn install_rust(&self, version: &str) -> Result<PathBuf> {
+        use crate::toolset::{ToolRequest, ToolSource, ToolVersion, ToolVersionOptions, Toolset};
+        ensure!(self.tools.contains("rust"), "Rust backend is not admitted");
+        let parts: Vec<_> = version.split('.').collect();
+        ensure!(
+            parts.len() == 3
+                && parts
+                    .iter()
+                    .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit())),
+            "Rust embedding requires an exact stable version"
+        );
+        let mut options = ToolVersionOptions::default();
+        options
+            .opts
+            .insert("profile".into(), toml::Value::String("minimal".into()));
+        let request = ToolRequest::new_with_options(
+            Arc::new(crate::args::BackendArg::from("rust")),
+            version,
+            options,
+            ToolSource::Argument,
+        )?;
+        let backend = request.backend()?;
+        let tv = ToolVersion::new(request, version.into());
+        #[derive(Debug)]
+        struct Report;
+        impl crate::ui::progress_report::SingleReport for Report {
+            fn set_message(&self, message: String) {
+                eprintln!("{message}");
+            }
+        }
+        let ctx = crate::install_context::InstallContext {
+            config: self.config.clone(),
+            ts: Arc::new(Toolset::new(ToolSource::Argument)),
+            pr: Arc::new(Report),
+            force: false,
+            dry_run: false,
+            explicit_yes: true,
+            locked: false,
+            before_date: None,
+            dependency_context: Default::default(),
+        };
+        let tv = backend.install_version_(&ctx, tv).await?;
+        let environment = backend.exec_env(&self.config, &ctx.ts, &tv).await?;
+        let output = std::process::Command::new(tv.install_path().join(if cfg!(windows) {
+            "rustc.exe"
+        } else {
+            "rustc"
+        }))
+        .args(["--print", "sysroot"])
+        .envs(environment)
+        .output()?;
+        ensure!(
+            output.status.success(),
+            "installed rustc did not report its sysroot"
+        );
+        let root = PathBuf::from(String::from_utf8(output.stdout)?.trim()).canonicalize()?;
+        let private = settings::Settings::get()
+            .rust
+            .rustup_home
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("private Rust home is unavailable"))?
+            .canonicalize()?;
+        ensure!(
+            root.starts_with(private),
+            "Rust installer escaped its private home"
+        );
+        Ok(root)
     }
 
     pub fn config(&self) -> &Arc<Config> {

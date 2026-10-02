@@ -415,3 +415,15 @@ feature list, so the earlier package-local invocation could not be copied into
 Oyzu's manifest. No package version, upstream notice or license alternative is
 changed. Existing default features remain unchanged. Qualification and candidate
 graph collection now use the same public feature selection as a consumer.
+
+
+## Rust native installation boundary
+
+The embedding session now admits `rust` and provides `install_rust` for exact
+stable compiler versions. It calls the existing Rust backend installer with the
+minimal profile in explicit private Cargo/rustup homes, then returns the verified
+private sysroot for frontend publication. No separate mise executable is invoked.
+Bootstrap HTTP uses the supplied callback; rustup subprocess downloads use their
+normal public paths. The caller must not advertise this as enforced proxy support.
+The frontend owns lock identity, final storage and cached restoration. No new
+third-party source, dependencies or license alternatives are introduced.
