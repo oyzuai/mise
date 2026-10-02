@@ -185,3 +185,17 @@ not source approval. Ordinary conformance remains independent of network/fixture
 A fixture provisioned by Oyzu's public metadata capture helper covered Go 1.24.13
 and 1.25.0 on the initial three targets. Linux replay passed with Docker networking
 disabled; changing an expected size failed. No archive or target executable ran.
+
+Native embedding CI now provisions the optional real Go metadata replay on each
+initial host. Its Python capture helper is fetched from Oyzu commit
+`f35c01d5bc8348b4ee6efee8e52c5352e0003dfd` and must match SHA-256
+`159f0213c465379b2100a4b1c2b074f05aad6db3a6ea221ddcc79e103b3e8c2c`
+before execution. It is staged outside the fork checkout in a temporary repository
+shape so its output-location guard remains effective. Captured fixtures and reports
+are retained as target/revision artifacts for 30 days, including after a replay
+failure when capture succeeded. Baseline conformance runs independently first.
+Live publisher failures remain failures, never synthetic substitutions.
+The example-file workflow filters were also corrected to separate the entrypoint
+from its directory glob. Workflow syntax/path filters and the exact provisioner
+step passed locally on Windows; new native workflow execution remains pending.
+No dependency, preserved notice or product Rust implementation changed.
