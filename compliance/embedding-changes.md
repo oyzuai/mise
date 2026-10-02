@@ -87,3 +87,11 @@ versions/targets, separate Node/Go admission and zero transport callbacks. It
 does not use Go's Git discovery, download archives or run Go. Catalog membership,
 checksum authenticity, native archive layout/executable parity and broker route
 mapping remain qualification gates. No dependency or upstream notice changed.
+
+An eighth isolated scenario exercises the existing Java backend's target-aware
+`resolve_lock_info` API against supplied synthetic Temurin metadata for Linux,
+Darwin ARM64 and Windows. It checks URL/checksum preservation, target-specific
+archive filtering, unavailable-version denial, isolated Java admission and one
+metadata callback per target. It neither downloads a JDK nor claims a Java layout
+plan, publisher verification or install parity. Java production source is unchanged;
+this adds evidence for reusing its parser without creating another catalog.

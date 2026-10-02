@@ -44,6 +44,7 @@ fn main() -> Result<()> {
         "node-denied",
         "backend",
         "go-facts",
+        "java-metadata",
     ] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -84,6 +85,9 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
     if scenario == "go-facts" {
         input.tools = BTreeSet::from(["go".into()]);
     }
+    if scenario == "java-metadata" {
+        input.tools = BTreeSet::from(["java".into()]);
+    }
     if scenario == "node-denied" {
         input.tools.clear();
     }
@@ -108,6 +112,27 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         input.transport = Some(Arc::new(move |_| {
             calls.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { eyre::bail!("Go archive facts must not acquire metadata") })
+        }));
+    }
+    if scenario == "java-metadata" {
+        let calls = calls.clone();
+        input.transport = Some(Arc::new(move |request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let (target, kind) = match request.url.as_str() {
+                    "https://mise-java.jdx.dev/jvm/ga/linux/x86_64.json" => ("linux", "tar.gz"),
+                    "https://mise-java.jdx.dev/jvm/ga/macosx/aarch64.json" => ("macos", "tar.gz"),
+                    "https://mise-java.jdx.dev/jvm/ga/windows/x86_64.json" => ("windows", "zip"),
+                    _ => eyre::bail!("unexpected Java metadata route"),
+                };
+                let body = serde_json::json!([
+                    {"vendor":"temurin", "version":"21.0.9+10", "java_version":"21.0.9", "image_type":"jdk", "jvm_impl":"hotspot", "file_type":kind, "url":format!("https://example.invalid/{target}/jdk.{kind}"), "checksum":format!("sha256:{}", "a".repeat(64))},
+                    {"vendor":"temurin", "version":"99.0.0", "java_version":"99.0.0", "image_type":"jdk", "jvm_impl":"hotspot", "file_type":"msi", "url":"https://example.invalid/unsupported.msi"}
+                ]).to_string();
+                Ok(reqwest::Response::from(
+                    http::Response::builder().status(200).body(body)?,
+                ))
+            })
         }));
     }
     if scenario == "backend" {
@@ -150,6 +175,14 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         let names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
         eyre::eyre!("{error}; isolated conformance child variable names: {names:?}")
     })?;
+    if scenario == "java-metadata" {
+        tokio::runtime::Runtime::new()?.block_on(check_java_metadata(&session))?;
+        ensure!(
+            calls.load(Ordering::SeqCst) == 3,
+            "Java metadata must use one supplied request per target"
+        );
+        return Ok(());
+    }
     if scenario == "go-facts" {
         tokio::runtime::Runtime::new()?.block_on(check_go_facts(&session))?;
         ensure!(
@@ -499,5 +532,61 @@ async fn check_backend(session: &Session, calls: Arc<AtomicUsize>) -> Result<()>
         calls.load(Ordering::SeqCst) == previous_calls,
         "layout facts performed acquisition"
     );
+    Ok(())
+}
+
+async fn check_java_metadata(session: &Session) -> Result<()> {
+    use mise::toolset::{ToolRequest, ToolSource, ToolVersion};
+    mise::config::settings::clear();
+    ensure!(
+        mise::config::Settings::get().enable_tools == Some(BTreeSet::from(["java".into()])),
+        "Java admission changed after settings reload"
+    );
+    ensure!(
+        session.config().config_files.is_empty(),
+        "Java discovered configuration"
+    );
+    ensure!(
+        session
+            .node_archive_facts("22.15.0", "linux/amd64/gnu")
+            .is_err(),
+        "Java session admitted Node"
+    );
+    mise::backend::load_tools().await?;
+    let argument = Arc::new(mise::args::BackendArg::from("java"));
+    let backend = mise::backend::get(&argument)
+        .ok_or_else(|| eyre::eyre!("core Java backend unavailable"))?;
+    for (target, label, kind) in [
+        ("linux-x64", "linux", "tar.gz"),
+        ("macos-arm64", "macos", "tar.gz"),
+        ("windows-x64", "windows", "zip"),
+    ] {
+        let target = mise::backend::platform_target::PlatformTarget::new(
+            mise::platform::Platform::parse(target)?,
+        );
+        for version in ["temurin-21.0.9+10", "temurin-99.0.0", "temurin-17.0.0"] {
+            let tv = ToolVersion::new(
+                ToolRequest::new(argument.clone(), version, ToolSource::Argument)?,
+                version.into(),
+            );
+            let result = backend.resolve_lock_info(&tv, &target).await;
+            if version == "temurin-21.0.9+10" {
+                let info = result?;
+                ensure!(
+                    info.url == Some(format!("https://example.invalid/{label}/jdk.{kind}")),
+                    "Java target URL changed"
+                );
+                ensure!(
+                    info.checksum == Some(format!("sha256:{}", "a".repeat(64))),
+                    "Java checksum metadata changed"
+                );
+            } else {
+                ensure!(
+                    result.is_err(),
+                    "Java accepted unavailable or unsupported metadata"
+                );
+            }
+        }
+    }
     Ok(())
 }
