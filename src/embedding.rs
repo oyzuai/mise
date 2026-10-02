@@ -30,8 +30,8 @@ pub struct Session {
 
 pub use crate::plugins::core::NodeArchiveFacts;
 pub use crate::plugins::core::NodeArchiveMetadata;
-pub use crate::plugins::core::PythonCatalogArtifact;
 pub use crate::plugins::core::{GoArchiveFacts, GoArchiveMetadata, GoVersionResolution};
+pub use crate::plugins::core::{PythonArchiveMetadata, PythonCatalogArtifact};
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
 
@@ -293,6 +293,21 @@ impl Session {
             locked_filename,
         )
         .await
+    }
+
+    /// Fetch catalog and release checksum claims through supplied transport.
+    /// Requires one unique valid SHA-256 for the selected artifact. No artifact
+    /// download, attestation validation, publisher authentication or install.
+    pub async fn python_archive_metadata(
+        &self,
+        version: &str,
+        target: &str,
+        locked_filename: Option<&str>,
+    ) -> Result<PythonArchiveMetadata> {
+        let artifact = self
+            .python_catalog_artifact(version, target, locked_filename)
+            .await?;
+        crate::plugins::core::python::embedding_archive_metadata(artifact).await
     }
 
     fn archive_target(

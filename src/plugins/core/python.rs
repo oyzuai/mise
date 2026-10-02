@@ -46,6 +46,37 @@ pub struct PythonCatalogArtifact {
     pub archive_url: String,
 }
 
+/// Declared checksum metadata; neither a signature nor verified artifact bytes.
+#[derive(Debug, Clone)]
+pub struct PythonArchiveMetadata {
+    pub artifact: PythonCatalogArtifact,
+    pub declared_sha256: String,
+    pub checksum_manifest_url: String,
+    pub checksum_manifest_sha256: String,
+}
+
+pub(crate) async fn embedding_archive_metadata(
+    artifact: PythonCatalogArtifact,
+) -> Result<PythonArchiveMetadata> {
+    use sha2::{Digest, Sha256};
+    let checksum_manifest_url =
+        format!("{PBS_RELEASE_DOWNLOAD_URL}{}/SHA256SUMS", artifact.release);
+    let bytes = HTTP_FETCH
+        .get_bytes_bounded(&checksum_manifest_url, 8 * 1024 * 1024)
+        .await?;
+    let text = std::str::from_utf8(&bytes)?;
+    let checksums = crate::hash::parse_sha256sums_checked(text)?;
+    let checksum = checksums
+        .get(&artifact.filename)
+        .ok_or_else(|| eyre!("Python artifact is absent from checksum manifest"))?;
+    Ok(PythonArchiveMetadata {
+        artifact,
+        declared_sha256: format!("sha256:{checksum}"),
+        checksum_manifest_url,
+        checksum_manifest_sha256: format!("sha256:{}", hex::encode(Sha256::digest(&bytes))),
+    })
+}
+
 pub(crate) async fn embedding_catalog_artifact(
     version: &str,
     target: &PlatformTarget,

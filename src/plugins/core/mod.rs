@@ -82,7 +82,7 @@ pub(crate) fn node_archive_facts(
     node::NodePlugin::new().embedding_archive_facts(version, target, target_key)
 }
 pub(crate) mod python;
-pub use python::PythonCatalogArtifact;
+pub use python::{PythonArchiveMetadata, PythonCatalogArtifact};
 #[cfg_attr(windows, path = "ruby_windows.rs")]
 mod ruby;
 mod ruby_common;

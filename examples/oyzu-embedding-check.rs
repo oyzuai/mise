@@ -107,6 +107,9 @@ fn main() -> Result<()> {
         "python-catalog",
         "python-offline",
         "python-unadmitted",
+        "python-checksums",
+        "python-checksums-duplicate",
+        "python-checksums-missing",
     ];
     if replay.is_some() {
         scenarios.push("go-real-metadata");

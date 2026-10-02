@@ -31,9 +31,35 @@ pub fn run(scenario: &str, state: PathBuf) -> Result<()> {
     };
     if scenario != "python-offline" {
         let calls = calls.clone();
+        let checksum_mode = scenario.starts_with("python-checksums");
+        let duplicate = scenario == "python-checksums-duplicate";
+        let missing = scenario == "python-checksums-missing";
         options.transport = Some(Arc::new(move |request| {
             calls.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
+                if checksum_mode
+                    && request.url.as_str()
+                        == "https://github.com/astral-sh/python-build-standalone/releases/download/20250323/SHA256SUMS"
+                {
+                    let mut body = TARGETS
+                        .iter()
+                        .map(|(_, platform)| {
+                            format!(
+                                "{}  cpython-3.12.13+20250323-{platform}-install_only.tar.gz\n",
+                                "a".repeat(64)
+                            )
+                        })
+                        .collect::<String>();
+                    if duplicate {
+                        body = body.repeat(2);
+                    }
+                    if missing {
+                        body.clear();
+                    }
+                    return Ok(reqwest::Response::from(
+                        http::Response::builder().status(200).body(body)?,
+                    ));
+                }
                 let platform = TARGETS.iter().find_map(|(_, platform)| {
                     (request.url.as_str() == format!("https://mise-versions.jdx.dev/tools/python-precompiled-{platform}.gz"))
                         .then_some(*platform)
@@ -56,6 +82,42 @@ pub fn run(scenario: &str, state: PathBuf) -> Result<()> {
     }
     let session = Session::initialize(options)?;
     tokio::runtime::Runtime::new()?.block_on(async {
+        if scenario.starts_with("python-checksums") {
+            for (target, platform) in TARGETS {
+                let locked = format!("cpython-3.12.13+20250323-{platform}-install_only.tar.gz");
+                let result = session
+                    .python_archive_metadata("3.12.13", target, Some(&locked))
+                    .await;
+                if scenario != "python-checksums" {
+                    ensure!(result.is_err(), "ambiguous or missing checksum accepted");
+                } else {
+                    let metadata = result?;
+                    ensure!(
+                        metadata.artifact.filename == locked,
+                        "checksum bound to wrong artifact"
+                    );
+                    ensure!(
+                        metadata.declared_sha256 == format!("sha256:{}", "a".repeat(64)),
+                        "wrong declared checksum"
+                    );
+                    ensure!(
+                        metadata
+                            .checksum_manifest_url
+                            .ends_with("/20250323/SHA256SUMS"),
+                        "wrong checksum route"
+                    );
+                    ensure!(
+                        metadata.checksum_manifest_sha256.len() == 71,
+                        "missing checksum snapshot digest"
+                    );
+                }
+            }
+            ensure!(
+                calls.load(Ordering::SeqCst) == 6,
+                "expected catalog and checksum requests only"
+            );
+            return Ok(());
+        }
         if scenario != "python-catalog" {
             ensure!(
                 session

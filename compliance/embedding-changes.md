@@ -368,3 +368,21 @@ pass. Three new fresh-process Session scenarios cover catalog-only transport,
 offline denial and backend admission; all 25 ordinary harness scenarios pass
 on Linux. Native CI includes these scenarios; results for this API remain pending. Original notices and
 dependencies remain unchanged.
+
+### Python declared checksum lookup (validation in progress)
+
+`Session::python_archive_metadata` composes catalog-only selection with a bounded
+release `SHA256SUMS` fetch through the supplied transport. It reuses the shared
+strict SHA-256 parser: at most 8 MiB and 4,096 unique filenames, valid UTF-8,
+well-formed digests, and an exact selected filename. Duplicate, missing or invalid
+entries fail. The result retains catalog facts and adds the declared artifact
+SHA-256, checksum URL and exact checksum-response digest. It does not download
+or execute the artifact, verify attestations, or authenticate the publisher.
+
+Three additional public Session scenarios cover valid, duplicate and missing
+checksum records on all initial targets and require only catalog/checksum requests.
+Linux formatting, scoped strict library/example Clippy and all 28 ordinary
+embedding harness scenarios pass. Native validation remains pending. A read-only observation of upstream
+release 20260807 on 2026-10-02 measured 122,082 bytes and 852 checksum rows, below
+the parser limits; this is size evidence, not retained provenance or real checksum
+replay. Dependencies, upstream notices and licensing decisions are unchanged.
