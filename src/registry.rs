@@ -26,7 +26,7 @@ use url::Url;
 // the registry is generated from registry/ in the project root
 static BAKED_REGISTRY: Registry = include!(concat!(env!("OUT_DIR"), "/registry.rs"));
 
-#[cfg(any(test, debug_assertions))]
+/// Registry generated from this source revision, without floating-cache lookup.
 pub fn baked_registry() -> &'static Registry {
     &BAKED_REGISTRY
 }

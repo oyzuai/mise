@@ -191,6 +191,40 @@ pub(crate) fn is_loaded() -> bool {
 }
 
 impl Config {
+    /// No discovery, templates, bootstrap modules, aliases, tasks or lock reads.
+    pub(crate) fn for_embedding() -> Result<Arc<Self>> {
+        let mut current = _CONFIG.write().unwrap();
+        eyre::ensure!(
+            current.is_none(),
+            "embedding config cannot replace an existing config"
+        );
+        let config = Arc::new(Self {
+            config_files: Default::default(),
+            bootstrap_config_maps: vec![],
+            project_root: None,
+            all_aliases: Default::default(),
+            repo_urls: Default::default(),
+            vars: Default::default(),
+            tera_ctx: tera::Context::new(),
+            shorthands: Default::default(),
+            shell_aliases: Default::default(),
+            tera_files: vec![],
+            aliases: Default::default(),
+            env: OnceCell::new_with(Some(EnvResults::default())),
+            env_with_sources: OnceCell::new_with(Some(Default::default())),
+            hooks: OnceCell::new_with(Some(vec![])),
+            tasks_cache: Arc::new(DashMap::new()),
+            workspace_project_graph_cache: Mutex::new(None),
+            daemons: Default::default(),
+            tool_request_set: OnceCell::new(),
+            toolset: OnceCell::new(),
+            vars_results: OnceCell::new_with(Some(EnvResults::default())),
+            lockfile_discovery: Default::default(),
+        });
+        *current = Some(config.clone());
+        Ok(config)
+    }
+
     /// Whether invocation-wide locked mode applies to a tool's config scope.
     /// Sources outside configuration files remain locked because they have no
     /// scope that can be excluded.

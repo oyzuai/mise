@@ -195,6 +195,10 @@ pub fn shim_farm_dirs() -> Vec<PathBuf> {
 /// write, and the function returns before locating the mise binary, so that steady
 /// state costs only the option checks.
 pub fn ensure_lazy_shims(missing: &[ToolVersion]) -> Result<()> {
+    eyre::ensure!(
+        mise_util::embedding::context().is_none(),
+        "embedding frontend owns native shim publication"
+    );
     let mut bins_by_dir = BTreeMap::<PathBuf, Vec<String>>::new();
     let mut lazy_bins_error = None;
     for tv in missing {
@@ -355,6 +359,10 @@ pub async fn reshim_for(
     force: bool,
     requested_scope: ShimScope,
 ) -> Result<()> {
+    eyre::ensure!(
+        mise_util::embedding::context().is_none(),
+        "embedding frontend owns native shim publication"
+    );
     let user_shims = dirs::shims();
     let system_shims = dirs::system_shims();
     let collocated = file::storage_paths_eq(&user_shims, &system_shims);
@@ -972,6 +980,9 @@ pub fn validate_wrapper_names<'a>(names: impl IntoIterator<Item = &'a String>) -
 /// shims at the payload beneath its refresh-stable `current` symlink instead. For other package
 /// managers, retain the PATH-visible executable so their stable launcher survives upgrades.
 pub fn mise_bin_for_shims() -> PathBuf {
+    if let Some(context) = mise_util::embedding::context() {
+        return context.frontend.clone();
+    }
     env::var_path("SNAP")
         .as_deref()
         .and_then(|snap| snap_mise_bin(&env::MISE_BIN, snap))

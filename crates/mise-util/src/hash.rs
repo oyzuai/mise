@@ -8,7 +8,7 @@ use crate::file::display_path;
 use crate::progress::SingleReport;
 use blake3::Hasher as Blake3Hasher;
 use digest::Digest;
-use eyre::{Result, bail};
+use eyre::{Result, bail, ensure};
 use md5::Md5;
 use sha1::Sha1;
 use sha2::{Sha224, Sha256, Sha384, Sha512};
@@ -156,15 +156,52 @@ pub fn ensure_checksum(
 
 pub fn parse_shasums(text: &str) -> HashMap<String, String> {
     text.lines()
-        .filter_map(|l| {
-            let mut parts = l.split_whitespace();
-            let hash = parts.next()?;
-            let name = parts.next()?;
-            // Strip coreutils binary-mode marker (e.g. "<hash> *file.tar.gz").
-            let name = name.strip_prefix('*').unwrap_or(name);
-            Some((name.into(), hash.into()))
-        })
+        .filter_map(shasum_fields)
+        .map(|(hash, name, _)| (name.into(), hash.into()))
         .collect()
+}
+
+fn shasum_fields(line: &str) -> Option<(&str, &str, bool)> {
+    let mut parts = line.split_whitespace();
+    let hash = parts.next()?;
+    let name = parts.next()?;
+    // Coreutils binary-mode marker; shared with the permissive legacy parser.
+    Some((
+        hash,
+        name.strip_prefix('*').unwrap_or(name),
+        parts.next().is_some(),
+    ))
+}
+
+/// Bounded SHA-256 manifest decoding for metadata admission. Reject duplicate
+/// names (even identical hashes), malformed/extra fields and non-SHA-256 values.
+/// This validates syntax, not the publisher or the bytes of any named artifact.
+pub fn parse_sha256sums_checked(text: &str) -> Result<HashMap<String, String>> {
+    ensure!(
+        text.len() <= 8 * 1024 * 1024,
+        "SHA-256 manifest exceeds byte limit"
+    );
+    let mut records = HashMap::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let (hash, name, extra) =
+            shasum_fields(line).ok_or_else(|| eyre::eyre!("malformed SHA-256 manifest entry"))?;
+        ensure!(
+            !extra && !name.is_empty() && !name.chars().any(char::is_control),
+            "invalid SHA-256 manifest filename/fields"
+        );
+        ensure!(
+            hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()),
+            "invalid SHA-256 manifest digest"
+        );
+        ensure!(records.len() < 4096, "SHA-256 manifest exceeds entry limit");
+        ensure!(
+            records
+                .insert(name.to_owned(), hash.to_ascii_lowercase())
+                .is_none(),
+            "duplicate SHA-256 manifest filename"
+        );
+    }
+    Ok(records)
 }
 
 #[cfg(test)]

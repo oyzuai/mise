@@ -60,6 +60,16 @@ impl PathEnv {
             .collect()
     }
 
+    /// Preserve user-owned duplicate PATH entries for a live shell delta.
+    pub fn join_verbatim(&self) -> Result<OsString, std::env::JoinPathsError> {
+        join_paths(
+            self.pre
+                .iter()
+                .chain(self.mise.iter())
+                .chain(self.post.iter()),
+        )
+    }
+
     pub fn join(&self) -> OsString {
         let joined = join_paths(self.to_vec()).unwrap();
         warn_if_cmd_ignores_path(&joined);

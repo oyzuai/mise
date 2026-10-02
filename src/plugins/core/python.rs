@@ -30,6 +30,132 @@ use tokio::sync::Mutex;
 use versions::Versioning;
 use xx::regex;
 
+// Bound both HTTP bytes and the application-level gzip expansion before selection.
+const PYTHON_CATALOG_LIMIT: usize = 16 * 1024 * 1024;
+
+/// Catalog claims only: no artifact checksum, publisher verification or installation.
+#[derive(Debug, Clone)]
+pub struct PythonCatalogArtifact {
+    pub version: String,
+    pub target: String,
+    pub catalog_url: String,
+    /// Digest of the original application-level gzip response bytes.
+    pub catalog_sha256: String,
+    pub filename: String,
+    pub release: String,
+    pub archive_url: String,
+}
+
+/// Declared checksum metadata; neither a signature nor verified artifact bytes.
+#[derive(Debug, Clone)]
+pub struct PythonArchiveMetadata {
+    pub artifact: PythonCatalogArtifact,
+    pub declared_sha256: String,
+    pub checksum_manifest_url: String,
+    pub checksum_manifest_sha256: String,
+}
+
+pub(crate) async fn embedding_archive_metadata(
+    artifact: PythonCatalogArtifact,
+) -> Result<PythonArchiveMetadata> {
+    use sha2::{Digest, Sha256};
+    let checksum_manifest_url =
+        format!("{PBS_RELEASE_DOWNLOAD_URL}{}/SHA256SUMS", artifact.release);
+    let bytes = HTTP_FETCH
+        .get_bytes_bounded(&checksum_manifest_url, 8 * 1024 * 1024)
+        .await?;
+    let text = std::str::from_utf8(&bytes)?;
+    let checksums = crate::hash::parse_sha256sums_checked(text)?;
+    let checksum = checksums
+        .get(&artifact.filename)
+        .ok_or_else(|| eyre!("Python artifact is absent from checksum manifest"))?;
+    Ok(PythonArchiveMetadata {
+        artifact,
+        declared_sha256: format!("sha256:{checksum}"),
+        checksum_manifest_url,
+        checksum_manifest_sha256: format!("sha256:{}", hex::encode(Sha256::digest(&bytes))),
+    })
+}
+
+pub(crate) async fn embedding_catalog_artifact(
+    version: &str,
+    target: &PlatformTarget,
+    target_key: &str,
+    locked_filename: Option<&str>,
+) -> Result<PythonCatalogArtifact> {
+    let platform = format!(
+        "{}-{}",
+        python_arch_for_target(target),
+        python_os_for_target(target)
+    );
+    let catalog_url =
+        format!("https://mise-versions.jdx.dev/tools/python-precompiled-{platform}.gz");
+    let raw = HTTP_FETCH
+        .get_bytes_bounded(&catalog_url, PYTHON_CATALOG_LIMIT)
+        .await?;
+    catalog_artifact_from_bytes(
+        &raw,
+        version,
+        &platform,
+        target_key,
+        catalog_url,
+        locked_filename,
+    )
+}
+
+fn catalog_artifact_from_bytes(
+    raw: &[u8],
+    version: &str,
+    platform: &str,
+    target_key: &str,
+    catalog_url: String,
+    locked_filename: Option<&str>,
+) -> Result<PythonCatalogArtifact> {
+    use sha2::{Digest, Sha256};
+    eyre::ensure!(
+        raw.len() <= PYTHON_CATALOG_LIMIT,
+        "Python catalog exceeds byte limit"
+    );
+    let manifest = decode_python_catalog(raw, PYTHON_CATALOG_LIMIT)?;
+    let (release, filename) =
+        select_embedded_python_precompiled(&manifest, version, platform, None, locked_filename)?
+            .ok_or_else(|| eyre!("Python artifact is absent from the supplied catalog"))?;
+    // The initial contract exposes only the default CPython install-only layout.
+    // Validate the complete selected name before constructing a publisher URL.
+    eyre::ensure!(
+        release.len() == 8
+            && release.bytes().all(|b| b.is_ascii_digit())
+            && ["install_only", "install_only_stripped"]
+                .iter()
+                .any(|flavor| filename
+                    == format!("cpython-{version}+{release}-{platform}-{flavor}.tar.gz")),
+        "Python catalog selected an unsupported artifact identity"
+    );
+    let archive_url = format!("{PBS_RELEASE_DOWNLOAD_URL}{release}/{filename}");
+    Ok(PythonCatalogArtifact {
+        version: version.to_owned(),
+        target: target_key.to_owned(),
+        catalog_url,
+        catalog_sha256: format!("sha256:{}", hex::encode(Sha256::digest(raw))),
+        filename,
+        release,
+        archive_url,
+    })
+}
+
+fn decode_python_catalog(bytes: &[u8], limit: usize) -> eyre::Result<String> {
+    let probe_limit = u64::try_from(limit)?
+        .checked_add(1)
+        .ok_or_else(|| eyre!("python catalog limit overflow"))?;
+    let mut decoder = GzDecoder::new(bytes).take(probe_limit);
+    let mut raw = String::new();
+    decoder.read_to_string(&mut raw)?;
+    if raw.len() > limit {
+        bail!("python catalog exceeds decoded byte limit");
+    }
+    Ok(raw)
+}
+
 const ATTESTATION_HELP: &str = "To disable attestation verification, set MISE_PYTHON_GITHUB_ATTESTATIONS=false\n\
     or add `python.github_attestations = false` under [settings] in mise.toml";
 const PBS_RELEASE_DOWNLOAD_URL: &str =
@@ -296,11 +422,12 @@ impl PythonPlugin {
                 let settings = Settings::get();
                 let url_path = python_precompiled_url_path(&settings);
                 let rsp = HTTP_FETCH
-                    .get_bytes(format!("https://mise-versions.jdx.dev/tools/{url_path}"))
+                    .get_bytes_bounded(
+                        format!("https://mise-versions.jdx.dev/tools/{url_path}"),
+                        PYTHON_CATALOG_LIMIT,
+                    )
                     .await?;
-                let mut decoder = GzDecoder::new(rsp.as_ref());
-                let mut raw = String::new();
-                decoder.read_to_string(&mut raw)?;
+                let raw = decode_python_catalog(&rsp, PYTHON_CATALOG_LIMIT)?;
                 let platform = python_precompiled_platform();
                 let flavor = settings.python.precompiled_flavor.clone();
                 // order by version, whether it is a release candidate, date, and in the preferred order of install types
@@ -808,11 +935,12 @@ impl PythonPlugin {
         let platform = format!("{arch}-{os}");
         let url_path = format!("python-precompiled-{arch}-{os}.gz");
         let rsp = HTTP_FETCH
-            .get_bytes(format!("https://mise-versions.jdx.dev/tools/{url_path}"))
+            .get_bytes_bounded(
+                format!("https://mise-versions.jdx.dev/tools/{url_path}"),
+                PYTHON_CATALOG_LIMIT,
+            )
             .await?;
-        let mut decoder = GzDecoder::new(rsp.as_ref());
-        let mut raw = String::new();
-        decoder.read_to_string(&mut raw)?;
+        let raw = decode_python_catalog(&rsp, PYTHON_CATALOG_LIMIT)?;
 
         let flavor = settings.python.precompiled_flavor.clone();
 
@@ -820,8 +948,17 @@ impl PythonPlugin {
         // `mise lock` refreshes the same artifact. `mise lock --bump` resolves
         // without the existing lockfile, so locked_filename is None and the
         // newest build wins.
-        let result =
-            select_python_precompiled(&raw, version, &platform, flavor.as_deref(), locked_filename);
+        let result = if mise_util::embedding::context().is_some() {
+            select_embedded_python_precompiled(
+                &raw,
+                version,
+                &platform,
+                flavor.as_deref(),
+                locked_filename,
+            )?
+        } else {
+            select_python_precompiled(&raw, version, &platform, flavor.as_deref(), locked_filename)
+        };
         if let Some(locked_filename) = locked_filename
             && result
                 .as_ref()
@@ -1296,6 +1433,26 @@ fn python_precompiled_filename_from_url<'a>(url: &'a str, version: &str) -> Opti
     filename
         .starts_with(&format!("cpython-{version}+{release}-"))
         .then_some(filename)
+}
+
+// Embedded frozen selection must never substitute a different PBS build.
+// Reuse upstream ranking for updates, but require an exact match for a locked file.
+fn select_embedded_python_precompiled(
+    manifest: &str,
+    version: &str,
+    platform: &str,
+    flavor: Option<&str>,
+    locked_filename: Option<&str>,
+) -> Result<Option<(String, String)>> {
+    let selected = select_python_precompiled(manifest, version, platform, flavor, locked_filename);
+    if let Some(locked) = locked_filename
+        && selected
+            .as_ref()
+            .is_none_or(|(_, filename)| filename != locked)
+    {
+        bail!("locked Python artifact is absent from the supplied catalog");
+    }
+    Ok(selected)
 }
 
 fn select_python_precompiled(
@@ -1833,6 +1990,163 @@ mod tests {
 
         let opts = opts_with("patch_sysconfig", "true");
         assert!(PythonOptions::new(&opts).lockfile_options().is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires independently captured OYZU_PYTHON_METADATA_FIXTURE"]
+    fn python_catalog_captured_replay() {
+        use base64::Engine;
+        use sha2::{Digest, Sha256};
+
+        let path = std::env::var_os("OYZU_PYTHON_METADATA_FIXTURE")
+            .expect("provide independently captured Python metadata");
+        let file = std::fs::File::open(path).unwrap();
+        let mut bytes = Vec::new();
+        file.take(68 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert!(bytes.len() <= 68 * 1024 * 1024);
+        let fixture: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(fixture["format"], 1);
+        assert_eq!(fixture["response_encoding"], "base64");
+        let cases = fixture["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 3);
+        for (index, (target, platform)) in [
+            ("linux/amd64/gnu", "x86_64-unknown-linux-gnu"),
+            ("darwin/arm64/native", "aarch64-apple-darwin"),
+            ("windows/amd64/msvc", "x86_64-pc-windows-msvc"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let case = &cases[index];
+            assert_eq!(case["target"], target);
+            let url =
+                format!("https://mise-versions.jdx.dev/tools/python-precompiled-{platform}.gz");
+            assert_eq!(case["catalog_url"], url);
+            let raw = base64::engine::general_purpose::STANDARD
+                .decode(fixture["responses"][&url].as_str().unwrap())
+                .unwrap();
+            assert!(raw.len() <= PYTHON_CATALOG_LIMIT);
+            assert_eq!(case["compressed_size"], raw.len());
+            assert_eq!(
+                case["compressed_sha256"],
+                format!("sha256:{}", hex::encode(Sha256::digest(&raw)))
+            );
+            let manifest = decode_python_catalog(&raw, PYTHON_CATALOG_LIMIT).unwrap();
+            assert_eq!(case["decoded_size"], manifest.len());
+            assert_eq!(
+                case["decoded_sha256"],
+                format!(
+                    "sha256:{}",
+                    hex::encode(Sha256::digest(manifest.as_bytes()))
+                )
+            );
+            let locked = format!("cpython-3.12.13+20250323-{platform}-install_only.tar.gz");
+            let selected = select_embedded_python_precompiled(
+                &manifest,
+                "3.12.13",
+                platform,
+                None,
+                Some(&locked),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(selected, ("20250323".to_owned(), locked.clone()));
+            let facts = catalog_artifact_from_bytes(
+                &raw,
+                "3.12.13",
+                platform,
+                target,
+                url.clone(),
+                Some(&locked),
+            )
+            .unwrap();
+            assert_eq!(facts.filename, locked);
+            assert_eq!(facts.release, "20250323");
+            assert_eq!(facts.catalog_url, url);
+            assert_eq!(
+                facts.catalog_sha256,
+                case["compressed_sha256"].as_str().unwrap()
+            );
+            assert_eq!(
+                facts.archive_url,
+                format!("{PBS_RELEASE_DOWNLOAD_URL}20250323/{locked}")
+            );
+            let without_locked = manifest
+                .lines()
+                .filter(|line| *line != locked)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                select_embedded_python_precompiled(
+                    &without_locked,
+                    "3.12.13",
+                    platform,
+                    None,
+                    Some(&locked),
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn python_catalog_locked_artifact_never_falls_back_in_embedding() {
+        let old = "cpython-3.12.13+20260728-x86_64-unknown-linux-gnu-install_only.tar.gz";
+        let new = "cpython-3.12.13+20260805-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz";
+        let manifest = format!("{old}\n{new}\n");
+        let platform = "x86_64-unknown-linux-gnu";
+        let exact =
+            select_embedded_python_precompiled(&manifest, "3.12.13", platform, None, Some(old))
+                .unwrap()
+                .unwrap();
+        assert_eq!(exact.1, old);
+        let update = select_embedded_python_precompiled(&manifest, "3.12.13", platform, None, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.1, new);
+        assert!(
+            select_embedded_python_precompiled(new, "3.12.13", platform, None, Some(old)).is_err()
+        );
+        assert!(
+            select_embedded_python_precompiled("", "3.12.13", platform, None, Some(old)).is_err()
+        );
+        assert!(
+            select_embedded_python_precompiled(&manifest, "3.12.12", platform, None, Some(old))
+                .is_err()
+        );
+        // Upstream's ordinary refresh behavior remains available outside embedding.
+        assert_eq!(
+            select_python_precompiled(new, "3.12.13", platform, None, Some(old))
+                .unwrap()
+                .1,
+            new
+        );
+    }
+
+    #[test]
+    fn python_catalog_gzip_is_bounded_and_validated() {
+        use std::io::Write;
+        let gzip = |bytes: &[u8]| {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+        let catalog = gzip(b"cpython-example\n");
+        assert_eq!(
+            decode_python_catalog(&catalog, 16).unwrap(),
+            "cpython-example\n"
+        );
+        assert!(decode_python_catalog(&catalog, 15).is_err());
+        assert!(decode_python_catalog(&gzip(&vec![b'x'; 65536]), 1024).is_err());
+        assert!(decode_python_catalog(&gzip(&[0xff]), 16).is_err());
+        assert!(decode_python_catalog(&catalog[..catalog.len() - 1], 16).is_err());
+        let mut corrupt = catalog;
+        let index = corrupt.len() - 8;
+        corrupt[index] ^= 1;
+        assert!(decode_python_catalog(&corrupt, 16).is_err());
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub(crate) mod deps_graph;
 pub mod direnv;
 pub mod dirs;
 pub mod duration;
+pub mod embedding;
 pub mod env;
 pub mod env_diff;
 pub mod errors;

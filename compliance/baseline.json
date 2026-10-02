@@ -30,7 +30,7 @@
     {
       "path": "Cargo.toml",
       "kind": "dependency-input",
-      "sha256_lf": "3f366c621f5a1376cbc3991237eca273cff7a94258a6ab2b01e7f528986a4807"
+      "sha256_lf": "1a5e1983ad22567c9d70c486f7040caa4e8f7473c45dae94b7df4e7fb0dc9eec"
     },
     {
       "path": "LICENSE",

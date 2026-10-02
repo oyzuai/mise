@@ -17,11 +17,72 @@ mod bun;
 mod deno;
 mod dotnet;
 mod elixir;
+mod embedding_selection;
 mod erlang;
 mod go;
+pub use go::{GoArchiveFacts, GoArchiveMetadata, GoVersionResolution};
+pub(crate) async fn go_archive_metadata(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> eyre::Result<GoArchiveMetadata> {
+    go::GoPlugin::new()
+        .embedding_archive_metadata(version, target, target_key)
+        .await
+}
+pub(crate) fn go_archive_facts(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> GoArchiveFacts {
+    go::GoPlugin::new().embedding_archive_facts(version, target, target_key)
+}
 mod java;
+pub(crate) async fn resolve_java_version(
+    request: &str,
+    constraints: &[String],
+    target: &crate::backend::platform_target::PlatformTarget,
+) -> eyre::Result<String> {
+    java::JavaPlugin::new()
+        .embedding_resolve_version(request, constraints, target)
+        .await
+}
 mod node;
+pub use node::{NodeArchiveFacts, NodeArchiveMetadata};
+pub(crate) async fn node_archive_metadata(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> eyre::Result<NodeArchiveMetadata> {
+    node::NodePlugin::new()
+        .embedding_archive_metadata(version, target, target_key)
+        .await
+}
+pub(crate) async fn resolve_node_version(
+    config: &Arc<crate::config::Config>,
+    request: &str,
+    constraints: &[String],
+) -> eyre::Result<String> {
+    embedding_selection::resolve_version(&node::NodePlugin::new(), config, request, constraints)
+        .await
+}
+pub(crate) async fn resolve_go_version(
+    request: &str,
+    constraints: &[String],
+) -> eyre::Result<GoVersionResolution> {
+    go::GoPlugin::new()
+        .embedding_resolve_version(request, constraints)
+        .await
+}
+pub(crate) fn node_archive_facts(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> eyre::Result<NodeArchiveFacts> {
+    node::NodePlugin::new().embedding_archive_facts(version, target, target_key)
+}
 pub(crate) mod python;
+pub use python::{PythonArchiveMetadata, PythonCatalogArtifact};
 #[cfg_attr(windows, path = "ruby_windows.rs")]
 mod ruby;
 mod ruby_common;

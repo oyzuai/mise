@@ -38,6 +38,9 @@ pub static SHELL_COMMAND_FLAG: &str = "-c";
 pub static SHELL_COMMAND_FLAG: &str = "/c";
 
 pub static HOME: Lazy<PathBuf> = Lazy::new(|| {
+    if let Some(context) = crate::embedding::context() {
+        return context.state.join("home");
+    }
     if let Some(home) = crate::testing::home() {
         return home.to_path_buf();
     }
@@ -635,6 +638,9 @@ pub fn in_home_dir() -> bool {
 /// be run from. Treating empty as unset is also what the tools mise mirrors here do: go-gh
 /// (`os.Getenv(x) != ""`) and `adrg/xdg` (`dir != "" && filepath.IsAbs(dir)`) both fall through.
 pub fn var_path(key: &str) -> Option<PathBuf> {
+    if let Some(path) = crate::embedding::path(key) {
+        return Some(path);
+    }
     var_os(key)
         .map(PathBuf::from)
         .map(replace_path)

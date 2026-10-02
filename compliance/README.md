@@ -3,8 +3,11 @@
 Status: operational guardrails proposed for maintainer review. The license policy
 and every dependency disposition remain **unapproved**. Inventory consistency is
 not permission to distribute and is not a legal opinion. The initial technical
-review owner is **@micahlmartin**, selected by the maintainer; legal approval is
-separate. No first-party license is selected by these files.
+review owner is **@micahlmartin**, selected by the maintainer. On 2026-10-02 the
+maintainer also assigned him ownership of licensing and distribution decisions.
+Ownership does not constitute approval of a dependency graph, policy or release;
+the actual decision must still be recorded against the reviewed revision.
+No first-party license is selected by these files.
 
 ## Rules for people and AI agents
 
@@ -81,6 +84,89 @@ as distribution clearance. Development CI compilation/test artifacts remain
 unaudited engineering outputs, not compliance-certified product releases.
 
 ## Review and GitHub enforcement
+
+### Candidate Cargo evidence
+
+`tooling/compliance/cargo_graph.py` collects review evidence for the embedding
+candidate with default features disabled and `rustls,vendored-lua` enabled:
+
+```sh
+python tooling/compliance/cargo_graph.py --target x86_64-unknown-linux-gnu --output cargo-evidence.json --notice-bundle cargo-notices.zip
+```
+
+Python 3.11+, Git, the candidate's Rust compiler and a previously provisioned Cargo
+cache are required. The command runs only offline, locked Cargo metadata; it does
+not compile, execute a backend, fetch missing packages or change the lockfile.
+The other supported target filters are `aarch64-apple-darwin` and
+`x86_64-pc-windows-msvc`. A target filter is not native execution evidence.
+The embedding workflow collects one report per target after the native library
+checks, explicitly provisioning the same locked, target-filtered Cargo metadata
+query and feature set before
+offline collection under Rust 1.95.0. Provisioning can use the network; collection
+cannot. It retains reports
+as `cargo-evidence-<target>-<commit>` artifacts for 30 days, including the report
+and original observed notice bytes. Download and preserve the reviewed evidence
+outside this expiring CI storage before any release review.
+Collection failure fails that job; a successful upload is not legal approval or
+proof of complete artifact obligations. Changes to the collector rerun this
+matrix as well as the compliance guard.
+Missing cached metadata is an error: provision it separately and repeat the
+command. The report path must have an existing parent and is overwritten.
+The optional `--notice-bundle` path must be different, have an existing parent
+and not already exist; it is created exclusively and never replaces another file.
+
+The ZIP contains the exact UTF-8/LF `cargo-evidence.json`, original notice bytes
+under package-identity-hash directories and `INDEX.json`. The index binds the
+report's raw SHA-256, each notice's package identity/original relative path,
+raw SHA-256, LF-normalized SHA-256 and byte size. It explicitly lists packages
+with no observed notice. Original line endings and copyright text are untouched.
+Fixed archive metadata and uncompressed entries make repeated output identical
+for identical report/notice bytes. A different host's metadata or working state
+can legitimately change its report and therefore its archive.
+
+Bundle collection rechecks notice hashes against the report and rejects changed,
+redirected, nonregular or unsafe-path inputs. It limits notices to 20,000 files,
+2 MiB each and 256 MiB total, plus 64 MiB each for report and index. Ordinary
+failure removes this operation's partial archive; an existing destination stays
+untouched. The report is written only after successful requested bundling. This
+operates on a trusted provisioned package cache, not a hostile-filesystem sandbox.
+The notice-bundle collector hash is also recorded in the report.
+
+This archive is review evidence, not a release notice bundle or SBOM. It does not
+select license alternatives, approve obligations, recover absent texts, include
+installed tools' licenses or fulfill required source distribution. Both report
+and index remain explicitly unapproved. Omitting `--notice-bundle` retains the
+report-only operation.
+
+The report follows normal and build dependency edges from mise, excludes edges
+that are exclusively development dependencies, retains Cargo's declared license
+expressions without selecting alternatives, and records lock checksums, resolved
+features and LF-normalized hashes of conventional notice files and declared
+license files. It binds the source revision, lockfile, metadata and collector
+hashes, and reports tracked worktree changes. Untracked source and generated
+inputs require separate review; a dirty report does not identify a clean release.
+Cargo metadata can unify development features, so this is a candidate review
+graph, not the exact compiled or distributed graph or a release SBOM.
+
+Scans are bounded to 4,096 packages, 100,000 directory entries per package,
+4,096 conventional notice files per package and 2 MiB per notice. Directory
+enumeration failures reject collection rather than silently omitting notices.
+No successful partial report is returned for an unreadable directory. Directory
+symlinks/junctions and symlinked notices are excluded and counted; unresolved or
+external declared license files are explicitly recorded. Repository package scans
+may include nested package notices. Source headers, generated and vendored code,
+native libraries, artifact contents and source-delivery obligations still need
+review. Source identities containing URL credentials or queries are rejected;
+absolute cache/workspace paths are not emitted. Every disposition remains
+`unreviewed`, with `legal_approval: false` and `release_ready: false`.
+
+The first Linux candidate collection at `3552b5d03111f6d3143233dbebb94a8368110a9e`
+observed 955 packages. It was collected from a worktree reported as modified and
+is exploratory evidence, not approval of that revision. Regression tests cover
+normal/build/development edges, unknown declarations, notice drift, malformed
+identities, missing lock entries and excluded external links.
+
+### Approval enforcement
 
 The workflow runs on every PR (no path filter), main pushes, review events and
 manual dispatch. It checks current input hashes and component notices and retains
