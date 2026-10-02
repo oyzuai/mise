@@ -191,6 +191,14 @@ impl Session {
             before_date: None,
             dependency_context: Default::default(),
         };
+        // The ordinary outer install lifecycle creates this parent. The
+        // embedding path skips its hooks/shims/lockfile effects, but the Rust
+        // backend still publishes its private runtime link beneath it.
+        std::fs::create_dir_all(
+            tv.install_path()
+                .parent()
+                .ok_or_else(|| eyre::eyre!("Rust install parent unavailable"))?,
+        )?;
         let tv = backend.install_version_(&ctx, tv).await?;
         let environment = backend.exec_env(&self.config, &ctx.ts, &tv).await?;
         let output = std::process::Command::new(tv.install_path().join(if cfg!(windows) {
