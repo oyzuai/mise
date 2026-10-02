@@ -15,7 +15,7 @@ from check import kind
 
 
 def sensitive(path):
-    return bool(kind(path) or path.startswith(("compliance/", "tooling/compliance/", ".github/workflows/"))
+    return bool(kind(path) or path.startswith(("compliance/", "tooling/compliance/", ".github/"))
                 or Path(path).name in {"AGENTS.md", "CLAUDE.md", "CODEOWNERS"})
 
 
