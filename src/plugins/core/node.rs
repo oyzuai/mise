@@ -29,6 +29,24 @@ use tokio::sync::Mutex;
 use url::Url;
 use xx::regex;
 
+/// Upstream Node archive/layout facts, not a verified or admitted installation
+/// plan. The supervisor must obtain exact bytes, size, publisher evidence and
+/// a reviewed descriptor before converting these facts into its owned layout.
+#[derive(Debug, serde::Serialize)]
+pub struct NodeArchiveFacts {
+    pub version: String,
+    pub target: String,
+    pub archive_url: String,
+    pub archive_kind: String,
+    pub strip_prefix: String,
+    pub checksums_url: String,
+    pub signature_url: String,
+    pub node_relative_path: String,
+    /// Native upstream launcher location. In particular, npm.cmd is NOT an
+    /// Oyzu launch descriptor or shim; typed Node script launching is separate.
+    pub npm_launcher_relative_path: String,
+    pub bin_relative_path: String,
+}
 #[derive(Debug)]
 pub(super) struct NodePlugin {
     ba: Arc<BackendArg>,
@@ -409,19 +427,11 @@ impl NodePlugin {
     }
 
     fn node_path(&self, tv: &ToolVersion) -> PathBuf {
-        if cfg!(windows) {
-            tv.install_path().join("node.exe")
-        } else {
-            tv.install_path().join("bin").join("node")
-        }
+        tv.install_path().join(node_relative_path(cfg!(windows)))
     }
 
     fn npm_path(&self, tv: &ToolVersion) -> PathBuf {
-        if cfg!(windows) {
-            tv.install_path().join("npm.cmd")
-        } else {
-            tv.install_path().join("bin").join("npm")
-        }
+        tv.install_path().join(npm_relative_path(cfg!(windows)))
     }
 
     async fn npm<'a>(
@@ -788,24 +798,9 @@ impl Backend for NodePlugin {
         tv: &ToolVersion,
         target: &PlatformTarget,
     ) -> Result<Option<String>> {
-        let version = &tv.version;
-        let settings = Settings::get();
-
-        // Build platform-specific filename like Node.js does
-        let slug = self.build_platform_slug(version, target);
-        let filename = if target.os_name() == "windows" {
-            format!("{slug}.zip")
-        } else {
-            format!("{slug}.tar.gz")
-        };
-
-        // Use Node.js mirror URL to construct download URL.
-        // Musl tarballs live on unofficial-builds, not nodejs.org/dist.
-        let url = mirror_url_for(&settings.node, &filename)
-            .join(&format!("v{version}/{filename}"))
-            .map_err(|e| eyre::eyre!("Failed to construct Node.js download URL: {e}"))?;
-
-        Ok(Some(url.to_string()))
+        Ok(Some(
+            self.binary_artifact(&tv.version, target)?.url.to_string(),
+        ))
     }
 
     fn resolve_lockfile_options(
@@ -875,21 +870,12 @@ impl Backend for NodePlugin {
         let version = &tv.version;
         let settings = Settings::get();
 
-        // Build platform-specific filename
-        let slug = self.build_platform_slug(version, target);
-        let filename = if target.os_name() == "windows" {
-            format!("{slug}.zip")
-        } else {
-            format!("{slug}.tar.gz")
-        };
-
-        // Build download URL. Musl tarballs live on unofficial-builds; pick the
-        // mirror once and use it for both the tarball URL and SHASUMS so the
-        // recorded checksum matches the recorded URL.
-        let mirror = mirror_url_for(&settings.node, &filename);
-        let url = mirror
-            .join(&format!("v{version}/{filename}"))
-            .map_err(|e| eyre::eyre!("Failed to construct Node.js download URL: {e}"))?;
+        let BinaryArtifact {
+            filename,
+            mirror,
+            url,
+            ..
+        } = self.binary_artifact(version, target)?;
 
         let node_compile = settings.node_compile(CompilePurpose::Inspect);
         if node_compile == Some(true) && target.os_name() != "windows" {
@@ -932,6 +918,58 @@ impl Backend for NodePlugin {
 }
 
 impl NodePlugin {
+    // Shared by upstream lock metadata and Oyzu's data-only embedding facts.
+    fn binary_artifact(&self, version: &str, target: &PlatformTarget) -> Result<BinaryArtifact> {
+        let settings = Settings::get();
+        let slug = self.build_platform_slug(version, target);
+        let archive_kind = if target.os_name() == "windows" {
+            "zip"
+        } else {
+            "tar.gz"
+        };
+        let filename = format!("{slug}.{archive_kind}");
+        let mirror = mirror_url_for(&settings.node, &filename);
+        let url = mirror.join(&format!("v{version}/{filename}"))?;
+        Ok(BinaryArtifact {
+            slug,
+            filename,
+            mirror,
+            url,
+            archive_kind,
+        })
+    }
+
+    pub(super) fn embedding_archive_facts(
+        &self,
+        version: &str,
+        target: &PlatformTarget,
+        target_key: &str,
+    ) -> Result<NodeArchiveFacts> {
+        let artifact = self.binary_artifact(version, target)?;
+        if target.is_current() {
+            ensure!(
+                artifact.slug == slug(version),
+                "Node host and target archive layouts disagree"
+            );
+        }
+        let windows = target.os_name() == "windows";
+        let checksums_url = artifact
+            .mirror
+            .join(&format!("v{version}/SHASUMS256.txt"))?;
+        Ok(NodeArchiveFacts {
+            version: version.into(),
+            target: target_key.into(),
+            archive_url: artifact.url.to_string(),
+            archive_kind: artifact.archive_kind.into(),
+            strip_prefix: artifact.slug,
+            signature_url: format!("{checksums_url}.sig"),
+            checksums_url: checksums_url.to_string(),
+            node_relative_path: node_relative_path(windows).into(),
+            npm_launcher_relative_path: npm_relative_path(windows).into(),
+            bin_relative_path: if windows { "." } else { "bin" }.into(),
+        })
+    }
+
     async fn resolve_source_lock_info(&self, version: &str) -> Result<PlatformInfo> {
         let settings = Settings::get();
         let filename = source_tarball_name(version);
@@ -1019,6 +1057,21 @@ impl NodePlugin {
         }
         format!("node-v{version}-{os}-{arch}")
     }
+}
+
+struct BinaryArtifact {
+    slug: String,
+    filename: String,
+    mirror: Url,
+    url: Url,
+    archive_kind: &'static str,
+}
+
+fn node_relative_path(windows: bool) -> &'static str {
+    if windows { "node.exe" } else { "bin/node" }
+}
+fn npm_relative_path(windows: bool) -> &'static str {
+    if windows { "npm.cmd" } else { "bin/npm" }
 }
 
 #[derive(Debug)]

@@ -21,6 +21,14 @@ mod erlang;
 mod go;
 mod java;
 mod node;
+pub use node::NodeArchiveFacts;
+pub(crate) fn node_archive_facts(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> eyre::Result<NodeArchiveFacts> {
+    node::NodePlugin::new().embedding_archive_facts(version, target, target_key)
+}
 pub(crate) mod python;
 #[cfg_attr(windows, path = "ruby_windows.rs")]
 mod ruby;

@@ -15,6 +15,7 @@ No dependency manifest or lockfile is changed by this embedding patch.
 | HTTP transport hook | Route the shared HTTP client through an explicit callback; no callback denies requests | Upstream offers an equivalent mandatory transport hook |
 | Frontend ownership | Use the caller's image identity and reject mise shim publication | Upstream exposes equivalent frontend control |
 | Verbatim PATH | Preserve duplicate entries when composing live shell state | Upstream offers equivalent lossless composition |
+| Node archive facts | Reuse the Node backend's artifact/mirror selection and native path helpers for explicit targets without installing or executing them | Upstream exposes an equivalent data-only target layout boundary |
 
 The library-only `oyzu-embedding-check` example exercises initialization in fresh
 child processes with invalid ambient project/global configuration, absent and
@@ -52,3 +53,19 @@ Native macOS run 36967923522 identified `__CF_USER_TEXT_ENCODING` in a child
 created with `env_clear`. The embedding allowlist permits that variable only on
 macOS; inherited mise overrides still fail. The corrected native run must pass
 before macOS qualification is claimed.
+
+`Session::node_archive_facts` accepts an exact stable version and one of the
+initial Linux amd64/gnu, Darwin arm64/native or Windows amd64/msvc targets. It
+returns archive/checksum/signature locations, archive kind, strip prefix and
+upstream Node/npm launcher/PATH locations. Upstream lock metadata and this seam
+share `NodePlugin::binary_artifact`; native Node/npm launches share the same
+relative-path helpers. Target facts do not fetch, execute, assert artifact
+availability or verify publisher evidence. The caller must convert them into an
+admitted Oyzu layout only after obtaining exact bytes/size and verification.
+In particular, the observed `npm.cmd` path is not a product shim or typed launcher.
+
+The conformance example now has six process scenarios. It rejects planning when
+Node is not admitted; for two versions and three targets it checks exact facts,
+upstream URL parity and zero extra transport calls. These fixture checks are not
+native archive-layout parity or real backend installation qualification. No
+dependency or license/notice file changes accompany this seam.

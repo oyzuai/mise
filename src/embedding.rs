@@ -25,7 +25,10 @@ pub struct Options {
 
 pub struct Session {
     config: Arc<Config>,
+    tools: BTreeSet<String>,
 }
+
+pub use crate::plugins::core::NodeArchiveFacts;
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
 
@@ -102,7 +105,8 @@ impl Session {
         // never silently substitute the public mise aggregation service.
         defaults.use_versions_host = false;
         defaults.lockfile = Some(false);
-        defaults.enable_tools = Some(options.tools);
+        let tools = options.tools;
+        defaults.enable_tools = Some(tools.clone());
         defaults.disable_backends = vec!["asdf".into(), "vfox".into()];
         defaults.node.compile = Some(false);
         defaults.node.corepack = false;
@@ -132,10 +136,41 @@ impl Session {
         });
         Ok(Self {
             config: Config::for_embedding()?,
+            tools,
         })
     }
 
     pub fn config(&self) -> &Arc<Config> {
         &self.config
+    }
+
+    /// Compute facts for an exact stable version without acquisition,
+    /// installation, subprocesses or executing the target. Upstream may inspect
+    /// host platform metadata. Availability and authenticity are not implied.
+    /// Only the initial three target tuples are exposed here.
+    pub fn node_archive_facts(&self, version: &str, target: &str) -> Result<NodeArchiveFacts> {
+        ensure!(
+            version.len() <= 128 && target.len() <= 64,
+            "Node plan input exceeds limit"
+        );
+        ensure!(
+            self.tools.contains("node"),
+            "Node backend is not admitted in this embedding session"
+        );
+        let parsed = semver::Version::parse(version)?;
+        ensure!(
+            parsed.pre.is_empty() && parsed.build.is_empty() && parsed.to_string() == version,
+            "Node archive facts require an exact stable version"
+        );
+        let platform = match target {
+            "linux/amd64/gnu" => "linux-x64",
+            "darwin/arm64/native" => "macos-arm64",
+            "windows/amd64/msvc" => "windows-x64",
+            _ => eyre::bail!("Node archive target is not supported by the embedding boundary"),
+        };
+        let target_platform = crate::backend::platform_target::PlatformTarget::new(
+            crate::platform::Platform::parse(platform)?,
+        );
+        crate::plugins::core::node_archive_facts(version, &target_platform, target)
     }
 }

@@ -36,7 +36,14 @@ fn main() -> Result<()> {
     let root = directory.path().canonicalize()?;
     std::fs::write(root.join("mise.toml"), "this is not valid TOML [")?;
     std::fs::write(root.join(".tool-versions"), "node this-must-not-be-read")?;
-    for scenario in ["offline", "transport", "hostile", "unadmitted", "backend"] {
+    for scenario in [
+        "offline",
+        "transport",
+        "hostile",
+        "unadmitted",
+        "node-denied",
+        "backend",
+    ] {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
         std::fs::write(
@@ -73,6 +80,9 @@ fn main() -> Result<()> {
 
 fn child(scenario: &str, state: PathBuf) -> Result<()> {
     let mut input = options(state.clone())?;
+    if scenario == "node-denied" {
+        input.tools.clear();
+    }
     if scenario == "hostile" {
         ensure!(
             Session::initialize(input).is_err(),
@@ -129,6 +139,15 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         let names: Vec<_> = std::env::vars_os().map(|(name, _)| name).collect();
         eyre::eyre!("{error}; isolated conformance child variable names: {names:?}")
     })?;
+    if scenario == "node-denied" {
+        ensure!(
+            session
+                .node_archive_facts("22.15.0", "linux/amd64/gnu")
+                .is_err(),
+            "Node facts escaped session admission"
+        );
+        return Ok(());
+    }
     mise::config::settings::clear();
     let settings = mise::config::Settings::get();
     ensure!(
@@ -265,6 +284,96 @@ async fn check_backend(session: &Session, calls: Arc<AtomicUsize>) -> Result<()>
     ensure!(
         session.config().config_files.is_empty(),
         "backend discovered ambient configuration"
+    );
+    let previous_calls = calls.load(Ordering::SeqCst);
+    for (target, native, suffix, kind, node, npm, bin) in [
+        (
+            "linux/amd64/gnu",
+            "linux-x64",
+            "linux-x64",
+            "tar.gz",
+            "bin/node",
+            "bin/npm",
+            "bin",
+        ),
+        (
+            "darwin/arm64/native",
+            "macos-arm64",
+            "darwin-arm64",
+            "tar.gz",
+            "bin/node",
+            "bin/npm",
+            "bin",
+        ),
+        (
+            "windows/amd64/msvc",
+            "windows-x64",
+            "win-x64",
+            "zip",
+            "node.exe",
+            "npm.cmd",
+            ".",
+        ),
+    ] {
+        let facts = session.node_archive_facts(&resolved.version, target)?;
+        let slug = format!("node-v22.15.0-{suffix}");
+        let url = format!("https://nodejs.org/dist/v22.15.0/{slug}.{kind}");
+        ensure!(
+            facts.version == "22.15.0"
+                && facts.target == target
+                && facts.archive_url == url
+                && facts.archive_kind == kind
+                && facts.strip_prefix == slug
+                && facts.node_relative_path == node
+                && facts.npm_launcher_relative_path == npm
+                && facts.bin_relative_path == bin
+                && facts.checksums_url == "https://nodejs.org/dist/v22.15.0/SHASUMS256.txt"
+                && facts.signature_url == "https://nodejs.org/dist/v22.15.0/SHASUMS256.txt.sig",
+            "incorrect Node target facts: {facts:?}"
+        );
+        let platform = mise::backend::platform_target::PlatformTarget::new(
+            mise::platform::Platform::parse(native)?,
+        );
+        ensure!(
+            backend.get_tarball_url(&resolved, &platform).await? == Some(facts.archive_url),
+            "Node facts differ from upstream lock artifact selection"
+        );
+        let second = session.node_archive_facts("24.1.0", target)?;
+        ensure!(
+            second.archive_url.contains("/v24.1.0/node-v24.1.0-"),
+            "version leaked between plans"
+        );
+    }
+    for version in [
+        "22",
+        "latest",
+        "v22.15.0",
+        "22.15.0-rc.1",
+        "22.15.0+build",
+        "../../22.15.0",
+    ] {
+        ensure!(
+            session
+                .node_archive_facts(version, "linux/amd64/gnu")
+                .is_err(),
+            "unresolved/unsafe version accepted"
+        );
+    }
+    for target in [
+        "linux/amd64/musl",
+        "linux/arm64/gnu",
+        "darwin/amd64/native",
+        "windows/arm64/msvc",
+        "linux-x64",
+    ] {
+        ensure!(
+            session.node_archive_facts("22.15.0", target).is_err(),
+            "unqualified target accepted"
+        );
+    }
+    ensure!(
+        calls.load(Ordering::SeqCst) == previous_calls,
+        "layout facts performed acquisition"
     );
     Ok(())
 }
