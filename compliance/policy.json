@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "status": "provisional",
+  "distribution": "blocked_pending_audit",
+  "technical_reviewers": ["micahlmartin"],
+  "legal_approval": null,
+  "first_party_license_decision": "not_selected",
+  "approved_license_expressions": [],
+  "exceptions": []
+}

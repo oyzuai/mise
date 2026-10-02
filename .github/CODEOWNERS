@@ -1,0 +1,22 @@
+# Technical review owner, not a legal approval or a license grant.
+/compliance/ @micahlmartin
+/tooling/compliance/ @micahlmartin
+/.github/ @micahlmartin
+**/AGENTS.md @micahlmartin
+**/CLAUDE.md @micahlmartin
+**/LICENSE* @micahlmartin
+**/LICENCE* @micahlmartin
+**/COPYING* @micahlmartin
+**/NOTICE* @micahlmartin
+**/COPYRIGHT* @micahlmartin
+**/Cargo.toml @micahlmartin
+**/Cargo.lock @micahlmartin
+**/package*.json @micahlmartin
+**/npm-shrinkwrap.json @micahlmartin
+**/pnpm-lock.yaml @micahlmartin
+**/yarn.lock @micahlmartin
+**/go.mod @micahlmartin
+**/go.sum @micahlmartin
+**/pyproject.toml @micahlmartin
+**/*requirements*.txt @micahlmartin
+/vendor/ @micahlmartin

@@ -1,0 +1,47 @@
+name: License compliance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  compliance:
+    name: License inventory and review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test guard failure paths
+        run: python3 -m unittest discover -s tooling/compliance -p 'test_*.py'
+      - name: Check factual inventory and preserved notices
+        run: python3 tooling/compliance/check.py --report compliance-report.json
+      - name: Check human review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tooling/compliance/review.py
+      - name: Preserve factual report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: license-inventory-report
+          path: compliance-report.json
+          if-no-files-found: warn
+      - name: Confirm provisional release remains blocked
+        shell: bash
+        run: |
+          set +e
+          python3 tooling/compliance/check.py --release
+          status=$?
+          set -e
+          test "$status" -eq 2
