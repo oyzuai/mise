@@ -48,6 +48,9 @@ impl Session {
         );
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy().to_ascii_uppercase();
+            // Native macOS conformance observes this text-encoding variable in
+            // a child started with env_clear. It is not a mise configuration
+            // input; retain the strict allowlist on every other platform.
             ensure!(
                 matches!(
                     key.as_str(),
@@ -64,7 +67,7 @@ impl Session {
                         | "LC_ALL"
                         | "TERM"
                         | "RUST_BACKTRACE"
-                ),
+                ) || (cfg!(target_os = "macos") && key == "__CF_USER_TEXT_ENCODING"),
                 "embedding worker inherited an unapproved environment variable"
             );
         }

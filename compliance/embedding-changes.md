@@ -47,3 +47,8 @@ passed with Rust 1.95. The `Oyzu embedding boundary` workflow runs those checks 
 native Linux, Windows and macOS hosts. A declared matrix is not passing evidence;
 review the run for the exact candidate head. Full upstream CLI checks are excluded
 because Oyzu does not build or invoke a separate mise executable.
+
+Native macOS run 36967923522 identified `__CF_USER_TEXT_ENCODING` in a child
+created with `env_clear`. The embedding allowlist permits that variable only on
+macOS; inherited mise overrides still fail. The corrected native run must pass
+before macOS qualification is claimed.
