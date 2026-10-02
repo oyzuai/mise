@@ -49,7 +49,7 @@ jobs:
           key: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
       - name: Check embedding formatting
-        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs src/plugins/core/go.rs src/plugins/core/go/embedding.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs crates/mise-util/src/http.rs src/plugins/core/java.rs src/plugins/core/python.rs examples/oyzu-embedding-check.rs examples/oyzu-embedding-check/go_replay.rs examples/oyzu-embedding-check/java_replay.rs
+        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs src/plugins/core/go.rs src/plugins/core/go/embedding.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs crates/mise-util/src/http.rs src/plugins/core/java.rs src/plugins/core/python.rs examples/oyzu-embedding-check.rs examples/oyzu-embedding-check/go_replay.rs examples/oyzu-embedding-check/java_replay.rs examples/oyzu-embedding-check/python_catalog.rs
       - name: Check shared metadata utility library
         run: cargo +1.95.0 clippy --locked -p mise-util --lib --no-default-features --features rustls -- -D warnings
       - name: Check bounded metadata response collection

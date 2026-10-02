@@ -30,6 +30,7 @@ pub struct Session {
 
 pub use crate::plugins::core::NodeArchiveFacts;
 pub use crate::plugins::core::NodeArchiveMetadata;
+pub use crate::plugins::core::PythonCatalogArtifact;
 pub use crate::plugins::core::{GoArchiveFacts, GoArchiveMetadata, GoVersionResolution};
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
@@ -262,6 +263,36 @@ impl Session {
     ) -> Result<GoArchiveMetadata> {
         let platform = self.archive_target("go", version, target)?;
         crate::plugins::core::go_archive_metadata(version, &platform, target).await
+    }
+
+    /// Look up an exact stable CPython install-only artifact on an admitted target.
+    /// Uses supplied catalog transport only. A locked filename must be retained.
+    /// Returns catalog claims/digest, never an artifact checksum or verification.
+    /// No artifact download, subprocess, attestation check or install occurs.
+    pub async fn python_catalog_artifact(
+        &self,
+        version: &str,
+        target: &str,
+        locked_filename: Option<&str>,
+    ) -> Result<PythonCatalogArtifact> {
+        let platform = self.archive_target("python", version, target)?;
+        if let Some(filename) = locked_filename {
+            ensure!(
+                !filename.is_empty()
+                    && filename.len() <= 512
+                    && filename
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b)),
+                "invalid locked Python filename"
+            );
+        }
+        crate::plugins::core::python::embedding_catalog_artifact(
+            version,
+            &platform,
+            target,
+            locked_filename,
+        )
+        .await
     }
 
     fn archive_target(

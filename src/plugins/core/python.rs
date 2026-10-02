@@ -33,6 +33,85 @@ use xx::regex;
 // Bound both HTTP bytes and the application-level gzip expansion before selection.
 const PYTHON_CATALOG_LIMIT: usize = 16 * 1024 * 1024;
 
+/// Catalog claims only: no artifact checksum, publisher verification or installation.
+#[derive(Debug, Clone)]
+pub struct PythonCatalogArtifact {
+    pub version: String,
+    pub target: String,
+    pub catalog_url: String,
+    /// Digest of the original application-level gzip response bytes.
+    pub catalog_sha256: String,
+    pub filename: String,
+    pub release: String,
+    pub archive_url: String,
+}
+
+pub(crate) async fn embedding_catalog_artifact(
+    version: &str,
+    target: &PlatformTarget,
+    target_key: &str,
+    locked_filename: Option<&str>,
+) -> Result<PythonCatalogArtifact> {
+    let platform = format!(
+        "{}-{}",
+        python_arch_for_target(target),
+        python_os_for_target(target)
+    );
+    let catalog_url =
+        format!("https://mise-versions.jdx.dev/tools/python-precompiled-{platform}.gz");
+    let raw = HTTP_FETCH
+        .get_bytes_bounded(&catalog_url, PYTHON_CATALOG_LIMIT)
+        .await?;
+    catalog_artifact_from_bytes(
+        &raw,
+        version,
+        &platform,
+        target_key,
+        catalog_url,
+        locked_filename,
+    )
+}
+
+fn catalog_artifact_from_bytes(
+    raw: &[u8],
+    version: &str,
+    platform: &str,
+    target_key: &str,
+    catalog_url: String,
+    locked_filename: Option<&str>,
+) -> Result<PythonCatalogArtifact> {
+    use sha2::{Digest, Sha256};
+    eyre::ensure!(
+        raw.len() <= PYTHON_CATALOG_LIMIT,
+        "Python catalog exceeds byte limit"
+    );
+    let manifest = decode_python_catalog(raw, PYTHON_CATALOG_LIMIT)?;
+    let (release, filename) =
+        select_embedded_python_precompiled(&manifest, version, platform, None, locked_filename)?
+            .ok_or_else(|| eyre!("Python artifact is absent from the supplied catalog"))?;
+    // The initial contract exposes only the default CPython install-only layout.
+    // Validate the complete selected name before constructing a publisher URL.
+    eyre::ensure!(
+        release.len() == 8
+            && release.bytes().all(|b| b.is_ascii_digit())
+            && ["install_only", "install_only_stripped"]
+                .iter()
+                .any(|flavor| filename
+                    == format!("cpython-{version}+{release}-{platform}-{flavor}.tar.gz")),
+        "Python catalog selected an unsupported artifact identity"
+    );
+    let archive_url = format!("{PBS_RELEASE_DOWNLOAD_URL}{release}/{filename}");
+    Ok(PythonCatalogArtifact {
+        version: version.to_owned(),
+        target: target_key.to_owned(),
+        catalog_url,
+        catalog_sha256: format!("sha256:{}", hex::encode(Sha256::digest(raw))),
+        filename,
+        release,
+        archive_url,
+    })
+}
+
 fn decode_python_catalog(bytes: &[u8], limit: usize) -> eyre::Result<String> {
     let probe_limit = u64::try_from(limit)?
         .checked_add(1)
@@ -1943,6 +2022,26 @@ mod tests {
             .unwrap()
             .unwrap();
             assert_eq!(selected, ("20250323".to_owned(), locked.clone()));
+            let facts = catalog_artifact_from_bytes(
+                &raw,
+                "3.12.13",
+                platform,
+                target,
+                url.clone(),
+                Some(&locked),
+            )
+            .unwrap();
+            assert_eq!(facts.filename, locked);
+            assert_eq!(facts.release, "20250323");
+            assert_eq!(facts.catalog_url, url);
+            assert_eq!(
+                facts.catalog_sha256,
+                case["compressed_sha256"].as_str().unwrap()
+            );
+            assert_eq!(
+                facts.archive_url,
+                format!("{PBS_RELEASE_DOWNLOAD_URL}20250323/{locked}")
+            );
             let without_locked = manifest
                 .lines()
                 .filter(|line| *line != locked)

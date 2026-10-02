@@ -3,6 +3,8 @@
 mod go_replay;
 #[path = "oyzu-embedding-check/java_replay.rs"]
 mod java_replay;
+#[path = "oyzu-embedding-check/python_catalog.rs"]
+mod python_catalog;
 
 use eyre::{Result, ensure};
 use mise::embedding::{Options, Session};
@@ -102,6 +104,9 @@ fn main() -> Result<()> {
         "node-resolve",
         "node-resolve-offline",
         "node-metadata",
+        "python-catalog",
+        "python-offline",
+        "python-unadmitted",
     ];
     if replay.is_some() {
         scenarios.push("go-real-metadata");
@@ -157,6 +162,9 @@ fn main() -> Result<()> {
 }
 
 fn child(scenario: &str, state: PathBuf) -> Result<()> {
+    if scenario.starts_with("python-") {
+        return python_catalog::run(scenario, state);
+    }
     let mut input = options(state.clone())?;
     if scenario == "catalog" {
         input.tools = ["node", "go", "java", "python"].map(String::from).into();

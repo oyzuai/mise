@@ -345,3 +345,26 @@ library/example Clippy pass; native replay CI remains pending.
 This adds first-party verification to existing MIT-covered source; no upstream
 notices, dependencies or license choices change. It does not exercise the HTTP
 transport, public Session API, attestation verification or installation.
+
+### Python catalog-only artifact lookup (validation in progress)
+
+`Session::python_catalog_artifact` admits the initial three explicit targets and
+an exact stable CPython version. It fetches only the bounded precompiled catalog
+through the supplied transport, reuses upstream selection with locked-filename
+retention, and returns the exact compressed catalog digest plus filename, release
+and archive URL. Complete filename validation admits only the default install-only
+and install-only-stripped tar.gz layouts with an eight-digit release identity.
+Host settings do not override the explicit target. Invalid target/version/locked
+filename inputs fail before transport. Missing or unsupported selections fail.
+
+This intentionally does not call `resolve_lock_info`, whose provenance path can
+download an artifact. No archive, checksum sidecar, subprocess, installation or
+attestation operation runs here. Catalog integrity identifies the observed bytes;
+it does not establish artifact integrity or publisher authenticity. Version
+constraint resolution, snapshot reuse, checksum/attestation acquisition and Oyzu
+worker wiring remain outstanding. The real-catalog replay now also checks the
+returned locked facts and URL. Linux real-catalog replay, formatting and scoped strict library/example Clippy
+pass. Three new fresh-process Session scenarios cover catalog-only transport,
+offline denial and backend admission; all 25 ordinary harness scenarios pass
+on Linux. Native CI includes these scenarios; results for this API remain pending. Original notices and
+dependencies remain unchanged.
