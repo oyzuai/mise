@@ -72,7 +72,10 @@ impl GoPlugin {
             file.sha256.len() == 64 && file.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()),
             "invalid Go catalog SHA-256"
         );
-        let text = crate::http::HTTP.get_text(&archive.checksum_url).await?;
+        let raw = crate::http::HTTP
+            .get_bytes_bounded(&archive.checksum_url, 128)
+            .await?;
+        let text = std::str::from_utf8(&raw)?;
         ensure!(text.len() <= 128, "Go checksum metadata exceeds limit");
         let digest = text.trim();
         ensure!(
@@ -118,13 +121,13 @@ async fn catalog() -> Result<&'static Catalog> {
     CATALOG
         .get_or_try_init(|| async {
             let raw = crate::http::HTTP
-                .get_bytes("https://go.dev/dl/?mode=json&include=all")
+                .get_bytes_bounded("https://go.dev/dl/?mode=json&include=all", 16 * 1024 * 1024)
                 .await?;
             ensure!(
-                raw.as_ref().len() <= 16 * 1024 * 1024,
+                raw.len() <= 16 * 1024 * 1024,
                 "Go catalog exceeds byte limit"
             );
-            let raw = std::str::from_utf8(raw.as_ref())?;
+            let raw = std::str::from_utf8(&raw)?;
             let releases: Vec<Release> = serde_json::from_str(raw)?;
             ensure!(
                 releases.len() <= 100_000,

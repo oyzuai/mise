@@ -372,9 +372,18 @@ impl JavaPlugin {
             java_arch(platform)
         );
 
-        let metadata = HTTP_FETCH
-            .json::<Vec<JavaMetadata>, _>(url)
-            .await?
+        let records = if mise_util::embedding::context().is_some() {
+            let bytes = HTTP_FETCH.get_bytes_bounded(url, 16 * 1024 * 1024).await?;
+            let records: Vec<JavaMetadata> = serde_json::from_slice(&bytes)?;
+            color_eyre::eyre::ensure!(
+                records.len() <= 100_000,
+                "Java catalog exceeds record limit"
+            );
+            records
+        } else {
+            HTTP_FETCH.json::<Vec<JavaMetadata>, _>(url).await?
+        };
+        let metadata = records
             .into_iter()
             .filter(|m| {
                 m.file_type

@@ -219,3 +219,28 @@ only, with no dependency or upstream notice changes. Declared checksum agreement
 is not publisher verification, exact/range Java resolution admission, artifact
 installation, legal approval or production integration. No mise CLI is built or
 invoked; the example links the existing library candidate.
+
+### Bounded embedded catalog collection
+
+The shared HTTP client now offers get_bytes_bounded through the existing
+embedding/authorization transport path. It checks declared/body lengths and
+accumulates decoded chunks only within the caller's limit; response loss returns
+an error rather than partial metadata. Go's embedded catalog uses 16 MiB and its
+checksum sidecar 128 bytes. Java's embedded catalog uses 16 MiB and rejects more
+than 100,000 decoded records; ordinary nonembedded Java retains its existing path.
+Java's record count is checked after bounded-byte JSON decoding, so this is not
+a complete parser-allocation or process-memory limit. Provider buffering before
+returning a response, transport deadlines and executor memory limits remain
+separate obligations. No dependency or original notice changes are introduced.
+
+Bounded-collection validation: two utility tests cover exact limits, declared
+length rejection, unknown-length chunk accumulation and interrupted streams.
+Strict utility and library/example Clippy, Rust 1.95 formatting and all 22 ordinary
+boundary cases plus real Go (six cases) and Java (three targets) replay passed on
+Linux. Combined replay ran with container networking disabled. CI runs the new
+utility tests on all three hosts. Java capture/replay now runs after successful
+shared boundary checks even if independent Go capture fails; failure still fails
+the job and is never replaced by synthetic inputs. Run 37004801980 passed Java
+replay on Windows/macOS, while Ubuntu's Go capture returned HTTP 404 before Java.
+A fresh local seven-response Go capture succeeded; that does not erase the CI
+failure or prove its root cause. New bounded-reader native CI remains pending.

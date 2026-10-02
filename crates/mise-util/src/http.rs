@@ -749,6 +749,12 @@ impl Client {
         Ok(resp.bytes().await?)
     }
 
+    /// Collect metadata with a byte ceiling while retaining the normal
+    /// authorization/embedding transport path. Counts decoded response bytes.
+    pub async fn get_bytes_bounded<U: IntoUrl>(&self, url: U, limit: usize) -> Result<Vec<u8>> {
+        collect_metadata(self.get_async(url).await?, limit).await
+    }
+
     pub async fn get_async<U: IntoUrl>(&self, url: U) -> Result<Response> {
         let url = url.into_url()?;
         let headers = host_auth_headers(&url)?;
@@ -2611,3 +2617,82 @@ async fn warn_when_download_is_slow(
 
 #[cfg(test)]
 mod tests;
+
+async fn collect_metadata(mut response: Response, limit: usize) -> Result<Vec<u8>> {
+    eyre::ensure!(limit > 0, "metadata byte limit must be positive");
+    let declared = response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .map(|value| -> Result<u64> { Ok(value.to_str()?.parse()?) })
+        .transpose()?;
+    eyre::ensure!(
+        declared.is_none_or(|size| size <= limit as u64),
+        "metadata response exceeds byte limit"
+    );
+    eyre::ensure!(
+        response
+            .content_length()
+            .is_none_or(|size| size <= limit as u64),
+        "metadata response exceeds byte limit"
+    );
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        eyre::ensure!(
+            chunk.len() <= limit - bytes.len(),
+            "metadata response exceeds byte limit"
+        );
+        let required = bytes.len() + chunk.len();
+        if required > bytes.capacity() {
+            let capacity = required.max(bytes.capacity().saturating_mul(2)).min(limit);
+            bytes.try_reserve_exact(capacity - bytes.len())?;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod metadata_bounds_tests {
+    use super::*;
+    #[tokio::test]
+    async fn bounded_metadata_checks_declared_and_actual_body_size() {
+        for (declared, length, limit, accepted) in [
+            (None, 8, 8, true),
+            (None, 9, 8, false),
+            (Some("99"), 1, 8, false),
+            (Some("1"), 9, 8, false),
+            (None, 0, 0, false),
+            (None, 0, 8, true),
+        ] {
+            let mut builder = http::Response::builder();
+            if let Some(length) = declared {
+                builder = builder.header("content-length", length);
+            }
+            let response = Response::from(builder.body(vec![b'x'; length]).unwrap());
+            let result = collect_metadata(response, limit).await;
+            assert_eq!(result.is_ok(), accepted);
+            if let Ok(bytes) = result {
+                assert_eq!(bytes, vec![b'x'; length]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_length_metadata_is_limited_across_chunks() {
+        for (tail, accepted) in [(1, true), (2, false)] {
+            let chunks: Vec<std::io::Result<Vec<u8>>> =
+                vec![Ok(vec![b'x'; 7]), Ok(vec![b'y'; tail])];
+            let body = reqwest::Body::wrap_stream(futures_util::stream::iter(chunks));
+            let response = Response::from(http::Response::builder().body(body).unwrap());
+            assert!(response.content_length().is_none());
+            assert_eq!(collect_metadata(response, 8).await.is_ok(), accepted);
+        }
+        let chunks: Vec<std::io::Result<Vec<u8>>> = vec![
+            Ok(vec![b'x'; 2]),
+            Err(std::io::Error::other("synthetic stream loss")),
+        ];
+        let body = reqwest::Body::wrap_stream(futures_util::stream::iter(chunks));
+        let response = Response::from(http::Response::builder().body(body).unwrap());
+        assert!(collect_metadata(response, 8).await.is_err());
+    }
+}
