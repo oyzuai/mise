@@ -9,6 +9,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/oyzu-embedding.yml'
+      - 'tooling/compliance/**'
   workflow_dispatch:
 
 permissions:
@@ -20,13 +21,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: '3'
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_DEV_INCREMENTAL: 'false'
+      RUSTUP_TOOLCHAIN: '1.95.0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install compiler
@@ -40,8 +48,19 @@ jobs:
           key: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
       - name: Check embedding formatting
-        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs crates/mise-util/src/embedding.rs examples/oyzu-embedding-check.rs
+        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/go.rs crates/mise-util/src/embedding.rs examples/oyzu-embedding-check.rs
       - name: Check library and conformance target
         run: cargo +1.95.0 clippy --locked --lib --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua -- -D warnings
       - name: Run fresh-process boundary and real backend parser checks
         run: cargo +1.95.0 run --locked --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua
+      - name: Provision locked metadata inputs for target review
+        run: cargo +1.95.0 fetch --locked --target ${{ matrix.target }}
+      - name: Collect unreviewed target dependency and notice evidence
+        run: python tooling/compliance/cargo_graph.py --target ${{ matrix.target }} --output cargo-evidence.json
+      - name: Preserve candidate review evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cargo-evidence-${{ matrix.target }}-${{ github.sha }}
+          path: cargo-evidence.json
+          if-no-files-found: error
+          retention-days: 30

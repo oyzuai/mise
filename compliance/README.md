@@ -99,6 +99,15 @@ cache are required. The command runs only offline, locked Cargo metadata; it doe
 not compile, execute a backend, fetch missing packages or change the lockfile.
 The other supported target filters are `aarch64-apple-darwin` and
 `x86_64-pc-windows-msvc`. A target filter is not native execution evidence.
+The embedding workflow collects one report per target after the native library
+checks, explicitly provisioning locked target metadata with `cargo fetch` before
+offline collection under Rust 1.95.0. Provisioning can use the network; collection
+cannot. It retains reports
+as `cargo-evidence-<target>-<commit>` artifacts for 30 days. Download and preserve
+the reviewed reports outside this expiring CI storage before any release review.
+Collection failure fails that job; a successful upload is not legal approval or
+proof of complete artifact obligations. Changes to the collector rerun this
+matrix as well as the compliance guard.
 Missing cached metadata is an error: provision it separately and repeat the
 command. The output path must have an existing parent and is overwritten.
 
