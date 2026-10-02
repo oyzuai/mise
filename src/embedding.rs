@@ -174,6 +174,21 @@ impl Session {
         crate::plugins::core::resolve_go_version(request, native_constraints).await
     }
 
+    /// Select a cataloged GA Temurin HotSpot JDK for an explicit admitted target.
+    /// Numeric or `temurin-` prefixes and `latest` use Java's native ordering;
+    /// every constraint must match. Other vendor/range/request modes fail.
+    /// The exact vendor/build identity is preserved. No installation or approval.
+    pub async fn resolve_java_version(
+        &self,
+        request: &str,
+        native_constraints: &[String],
+        target: &str,
+    ) -> Result<String> {
+        ensure!(self.tools.contains("java"), "Java backend is not admitted");
+        let platform = embedding_target(target)?;
+        crate::plugins::core::resolve_java_version(request, native_constraints, &platform).await
+    }
+
     /// Project names from this revision's baked registry onto admitted core
     /// backends. This is not version resolution or permission to install. No
     /// floating registry, ambient aliases, filesystem or network is consulted.
@@ -268,14 +283,18 @@ impl Session {
             parsed.pre.is_empty() && parsed.build.is_empty() && parsed.to_string() == version,
             "archive facts require an exact stable version"
         );
-        let platform = match target {
-            "linux/amd64/gnu" => "linux-x64",
-            "darwin/arm64/native" => "macos-arm64",
-            "windows/amd64/msvc" => "windows-x64",
-            _ => eyre::bail!("archive target is not supported by the embedding boundary"),
-        };
-        Ok(crate::backend::platform_target::PlatformTarget::new(
-            crate::platform::Platform::parse(platform)?,
-        ))
+        embedding_target(target)
     }
+}
+
+fn embedding_target(target: &str) -> Result<crate::backend::platform_target::PlatformTarget> {
+    let platform = match target {
+        "linux/amd64/gnu" => "linux-x64",
+        "darwin/arm64/native" => "macos-arm64",
+        "windows/amd64/msvc" => "windows-x64",
+        _ => eyre::bail!("archive target is not supported by the embedding boundary"),
+    };
+    Ok(crate::backend::platform_target::PlatformTarget::new(
+        crate::platform::Platform::parse(platform)?,
+    ))
 }

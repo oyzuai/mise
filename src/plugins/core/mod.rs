@@ -38,6 +38,15 @@ pub(crate) fn go_archive_facts(
     go::GoPlugin::new().embedding_archive_facts(version, target, target_key)
 }
 mod java;
+pub(crate) async fn resolve_java_version(
+    request: &str,
+    constraints: &[String],
+    target: &crate::backend::platform_target::PlatformTarget,
+) -> eyre::Result<String> {
+    java::JavaPlugin::new()
+        .embedding_resolve_version(request, constraints, target)
+        .await
+}
 mod node;
 pub use node::{NodeArchiveFacts, NodeArchiveMetadata};
 pub(crate) async fn node_archive_metadata(

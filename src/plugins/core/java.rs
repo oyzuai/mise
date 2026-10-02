@@ -181,6 +181,65 @@ impl JavaPlugin {
         metadata.insert(m.to_version_string(platform), m);
     }
 
+    /// Select only a cataloged GA Temurin HotSpot JDK for the explicit target.
+    /// Uses Java's existing ordering and prefix matcher; no semver conversion.
+    pub(super) async fn embedding_resolve_version(
+        &self,
+        request: &str,
+        constraints: &[String],
+        target: &PlatformTarget,
+    ) -> Result<String> {
+        eyre::ensure!(constraints.len() <= 256, "too many Java constraints");
+        let queries = std::iter::once(request)
+            .chain(constraints.iter().map(String::as_str))
+            .map(|query| {
+                eyre::ensure!(
+                    !query.is_empty()
+                        && query.len() <= 128
+                        && query
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b)),
+                    "Java embedding requires a version or prefix"
+                );
+                let suffix = query.strip_prefix("temurin-").unwrap_or(query);
+                eyre::ensure!(
+                    suffix == "latest" || suffix.bytes().next().is_some_and(|b| b.is_ascii_digit()),
+                    "Java embedding admits only Temurin version selectors"
+                );
+                Ok(if suffix == "latest" {
+                    "temurin-".to_owned()
+                } else {
+                    format!("temurin-{suffix}")
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let metadata = self.fetch_java_metadata_for_target("ga", target).await?;
+        let admitted: HashMap<_, _> = metadata
+            .into_iter()
+            .filter(|(v, m)| {
+                m.vendor == "temurin"
+                    && m.image_type.as_deref() == Some("jdk")
+                    && m.jvm_impl == "hotspot"
+                    && m.features.as_ref().is_some_and(Vec::is_empty)
+                    && *v == m.to_version_string(&target.platform)
+            })
+            .collect();
+        let mut versions: Vec<_> = sorted_java_versions(&admitted)
+            .into_iter()
+            .map(|v| v.version)
+            .collect();
+        eyre::ensure!(
+            versions.len() <= 100_000 && versions.iter().all(|v| v.len() <= 128),
+            "Java catalog exceeds selection limits"
+        );
+        for query in queries {
+            versions = self.fuzzy_match_filter(versions, &query, true);
+        }
+        versions
+            .pop()
+            .ok_or_else(|| eyre!("no cataloged Temurin JDK satisfies all constraints"))
+    }
+
     fn java_bin(&self, tv: &ToolVersion) -> PathBuf {
         tv.install_path().join("bin/java")
     }
@@ -399,65 +458,66 @@ impl JavaPlugin {
         opts: &ToolVersionOptions,
     ) -> Result<Vec<VersionInfo>> {
         let release_type = JavaOptions::new(opts).release_type().to_string();
-        let versions = self
-            .fetch_java_metadata(&release_type)
-            .await?
-            .iter()
-            .sorted_by_cached_key(|(v, m)| {
-                let is_shorthand = regex!(r"^\d").is_match(v);
-                let vendor = &m.vendor;
-                let is_jdk = match is_shorthand {
-                    true => true,
-                    false => m
-                        .image_type
-                        .as_ref()
-                        .is_some_and(|image_type| image_type == "jdk"),
-                };
-                let features = 10 - m.features.as_ref().map_or(0, |f| f.len());
-                let version = Versioning::new(&m.version);
-                // Extract build suffix after a '+', '.' if present. If not present, treat as 0.
-                let build_num = m
-                    .version
-                    .rsplit_once('+')
-                    .or_else(|| m.version.rsplit_once('.'))
-                    .and_then(|(_, tail)| {
-                        // take leading digits of tail
-                        let digits: String =
-                            tail.chars().take_while(|c| c.is_ascii_digit()).collect();
-                        if digits.is_empty() {
-                            None
-                        } else {
-                            u64::from_str(&digits).ok()
-                        }
-                    })
-                    .unwrap_or(0u64);
-                // Prefer base vendors (no dashes) over specialized variants like
-                // "liberica-nik". Fewer dashes → more canonical → sorts later.
-                let vendor_dashes = -(vendor.chars().filter(|c| *c == '-').count() as i32);
-                (
-                    is_shorthand,
-                    vendor_dashes,
-                    vendor,
-                    is_jdk,
-                    features,
-                    version,
-                    build_num,
-                    v.to_string(),
-                )
-            })
-            .map(|(v, m)| VersionInfo {
-                version: v.clone(),
-                created_at: m.created_at.clone(),
-                // The regex is a denylist heuristic, not a total grammar:
-                // a match proves "prerelease", a miss proves nothing.
-                prerelease: VERSION_REGEX.is_match(v).then_some(true),
-                ..Default::default()
-            })
-            .unique_by(|v| v.version.clone())
-            .collect();
-
-        Ok(versions)
+        Ok(sorted_java_versions(
+            self.fetch_java_metadata(&release_type).await?,
+        ))
     }
+}
+
+fn sorted_java_versions(metadata: &HashMap<String, JavaMetadata>) -> Vec<VersionInfo> {
+    metadata
+        .iter()
+        .sorted_by_cached_key(|(v, m)| {
+            let is_shorthand = regex!(r"^\d").is_match(v);
+            let vendor = &m.vendor;
+            let is_jdk = match is_shorthand {
+                true => true,
+                false => m
+                    .image_type
+                    .as_ref()
+                    .is_some_and(|image_type| image_type == "jdk"),
+            };
+            let features = 10usize.saturating_sub(m.features.as_ref().map_or(0, |f| f.len()));
+            let version = Versioning::new(&m.version);
+            // Extract build suffix after a '+', '.' if present. If not present, treat as 0.
+            let build_num = m
+                .version
+                .rsplit_once('+')
+                .or_else(|| m.version.rsplit_once('.'))
+                .and_then(|(_, tail)| {
+                    // take leading digits of tail
+                    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if digits.is_empty() {
+                        None
+                    } else {
+                        u64::from_str(&digits).ok()
+                    }
+                })
+                .unwrap_or(0u64);
+            // Prefer base vendors (no dashes) over specialized variants like
+            // "liberica-nik". Fewer dashes → more canonical → sorts later.
+            let vendor_dashes = -(vendor.chars().filter(|c| *c == '-').count() as i32);
+            (
+                is_shorthand,
+                vendor_dashes,
+                vendor,
+                is_jdk,
+                features,
+                version,
+                build_num,
+                v.to_string(),
+            )
+        })
+        .map(|(v, m)| VersionInfo {
+            version: v.clone(),
+            created_at: m.created_at.clone(),
+            // The regex is a denylist heuristic, not a total grammar:
+            // a match proves "prerelease", a miss proves nothing.
+            prerelease: VERSION_REGEX.is_match(v).then_some(true),
+            ..Default::default()
+        })
+        .unique_by(|v| v.version.clone())
+        .collect()
 }
 
 #[async_trait]

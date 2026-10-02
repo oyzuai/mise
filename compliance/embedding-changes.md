@@ -244,3 +244,38 @@ the job and is never replaced by synthetic inputs. Run 37004801980 passed Java
 replay on Windows/macOS, while Ubuntu's Go capture returned HTTP 404 before Java.
 A fresh local seven-response Go capture succeeded; that does not erase the CI
 failure or prove its root cause. New bounded-reader native CI remains pending.
+
+### Targeted Java version selection
+
+Session::resolve_java_version(request, constraints, target) selects a cataloged
+GA Temurin HotSpot JDK for Linux amd64 GNU, macOS arm64 or Windows amd64 MSVC.
+It reuses Java's existing catalog ordering and fuzzy prefix matcher. Numeric
+prefixes (21), vendor prefixes (temurin-21), exact catalog versions and latest
+are accepted; all additional constraints must match the same version. The result
+retains the complete vendor/build identity, such as temurin-21.0.6+7.0.LTS.
+No SemVer conversion or stripping of build metadata occurs. The shared ordering
+now saturates feature preference at zero for records with more than ten features,
+avoiding arithmetic underflow without changing ordinary catalog ordering.
+
+Selectors are at most 128 ASCII alphanumeric/period/plus/hyphen bytes; at most
+256 additional constraints are allowed. Unsupported request modes, other vendors,
+range operators, unknown targets and malformed/oversized input fail before any
+metadata acquisition. A missing version or empty intersection fails after catalog
+lookup. There is no installed-version or ambient-config fallback. Java listing
+and embedding selection share the same ordering implementation.
+
+This is an experimental selection seam, not production backend admission. Native
+builder range-language translation, explicit prereleases, catalog ambiguity and
+publisher verification, metadata provenance returned to the caller, the complete
+target matrix and production broker/worker integration remain open. The frontend
+still owns policy, request identity, Oyzu TOML/locks and installation. No new
+license, dependency or notice is introduced.
+
+Validation of Java selection: Linux strict library/example Clippy, Rust 1.95
+formatting and library-only build pass. With container networking disabled, all
+22 ordinary boundary scenarios plus captured Go and Java replay pass. Java now
+checks exact/prefix/latest intersection and unchanged full identity on all three
+targets, conflicts, missing versions, unsupported selectors/targets and excessive
+constraints. Invalid input makes no transport calls. Native CI for this new seam
+is pending. Compliance inventory is unchanged; 24 tests pass with two Windows
+symlink skips. This does not qualify the remaining Java admission obligations.

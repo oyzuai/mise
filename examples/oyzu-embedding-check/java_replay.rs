@@ -134,5 +134,67 @@ pub(super) async fn check(session: &Session, state: &Path, calls: &AtomicUsize) 
         calls.load(Ordering::SeqCst) == 3,
         "Java replay acquisition/cache count differs"
     );
+    for case in &fixture.cases {
+        for request in [
+            case.canonical_version.as_str(),
+            "21",
+            "temurin-21",
+            "latest",
+        ] {
+            ensure!(
+                session
+                    .resolve_java_version(
+                        request,
+                        std::slice::from_ref(&case.canonical_version),
+                        &case.target
+                    )
+                    .await?
+                    == case.canonical_version,
+                "Java selection lost identity or constraint"
+            );
+        }
+        ensure!(
+            session
+                .resolve_java_version("21", &["22".into()], &case.target)
+                .await
+                .is_err(),
+            "conflicting Java constraints accepted"
+        );
+        ensure!(
+            session
+                .resolve_java_version("temurin-0.0.0", &[], &case.target)
+                .await
+                .is_err(),
+            "uncataloged Java selection accepted"
+        );
+    }
+    let before_invalid = calls.load(Ordering::SeqCst);
+    for request in ["openjdk-21", "path:/jdk", "system", ">=21", "21\n", ""] {
+        ensure!(
+            session
+                .resolve_java_version(request, &[], "linux/amd64/gnu")
+                .await
+                .is_err(),
+            "unsupported Java selector accepted"
+        );
+    }
+    ensure!(
+        session
+            .resolve_java_version("21", &[], "linux/arm64/musl")
+            .await
+            .is_err(),
+        "unqualified Java target accepted"
+    );
+    ensure!(
+        session
+            .resolve_java_version("21", &vec!["21".into(); 257], "linux/amd64/gnu")
+            .await
+            .is_err(),
+        "oversized Java constraints accepted"
+    );
+    ensure!(
+        calls.load(Ordering::SeqCst) == before_invalid,
+        "invalid Java input performed acquisition"
+    );
     Ok(())
 }
