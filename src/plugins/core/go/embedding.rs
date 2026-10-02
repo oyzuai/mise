@@ -1,10 +1,10 @@
 //! OEP-0003 official Go release catalog adapter. Selection reuses mise rules;
 //! this module owns bounded JSON decoding and the exact metadata-byte identity.
-use super::GoPlugin;
+use super::{GoArchiveMetadata, GoPlugin};
 use crate::plugins::core::embedding_selection;
 use eyre::{Result, ensure};
 use itertools::Itertools;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use versions::Versioning;
 
 /// Selected canonical version plus exact supplied catalog identity. Neither field
@@ -19,9 +19,78 @@ pub struct GoVersionResolution {
 struct Release {
     version: String,
     stable: bool,
+    #[serde(default)]
+    files: Vec<ReleaseFile>,
+}
+
+#[derive(serde::Deserialize)]
+struct ReleaseFile {
+    filename: String,
+    os: String,
+    arch: String,
+    version: String,
+    sha256: String,
+    size: u64,
+    kind: String,
 }
 
 impl GoPlugin {
+    pub(in crate::plugins::core) async fn embedding_archive_metadata(
+        &self,
+        version: &str,
+        target: &crate::backend::platform_target::PlatformTarget,
+        target_key: &str,
+    ) -> Result<GoArchiveMetadata> {
+        let archive = self.embedding_archive_facts(version, target, target_key);
+        let catalog = catalog().await?;
+        let files = catalog
+            .files
+            .get(version)
+            .ok_or_else(|| eyre::eyre!("Go version is absent from stable release catalog"))?;
+        let filename = archive
+            .archive_url
+            .rsplit('/')
+            .next()
+            .ok_or_else(|| eyre::eyre!("Go archive URL has no filename"))?;
+        let file = files
+            .iter()
+            .find(|file| file.filename == filename)
+            .ok_or_else(|| eyre::eyre!("Go target archive is absent from release catalog"))?;
+        let (os, arch, _) = target_key
+            .split('/')
+            .collect_tuple()
+            .ok_or_else(|| eyre::eyre!("invalid Go target tuple"))?;
+        ensure!(
+            file.os == os
+                && file.arch == arch
+                && file.version == format!("go{version}")
+                && file.kind == "archive"
+                && file.size > 0,
+            "Go catalog file contradicts target archive identity"
+        );
+        ensure!(
+            file.sha256.len() == 64 && file.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "invalid Go catalog SHA-256"
+        );
+        let text = crate::http::HTTP.get_text(&archive.checksum_url).await?;
+        ensure!(text.len() <= 128, "Go checksum metadata exceeds limit");
+        let digest = text.trim();
+        ensure!(
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "invalid Go SHA-256 metadata"
+        );
+        ensure!(
+            digest.eq_ignore_ascii_case(&file.sha256),
+            "Go catalog and checksum sidecar disagree"
+        );
+        Ok(GoArchiveMetadata {
+            archive,
+            declared_sha256: format!("sha256:{}", digest.to_ascii_lowercase()),
+            declared_size: file.size,
+            catalog_sha256: catalog.digest.clone(),
+        })
+    }
+
     pub(in crate::plugins::core) async fn embedding_resolve_version(
         &self,
         request: &str,
@@ -37,6 +106,7 @@ impl GoPlugin {
 }
 
 struct Catalog {
+    files: BTreeMap<String, Vec<ReleaseFile>>,
     versions: Vec<String>,
     digest: String,
 }
@@ -62,6 +132,7 @@ async fn catalog() -> Result<&'static Catalog> {
             );
             let mut seen = BTreeSet::new();
             let mut versions = Vec::new();
+            let mut files = BTreeMap::new();
             for release in releases {
                 ensure!(
                     release.version.len() <= 128,
@@ -85,6 +156,20 @@ async fn catalog() -> Result<&'static Catalog> {
                 }) {
                     continue;
                 }
+                ensure!(
+                    release.files.len() <= 4096,
+                    "Go release exceeds file count limit"
+                );
+                let mut filenames = BTreeSet::new();
+                for file in &release.files {
+                    ensure!(
+                        !file.filename.is_empty()
+                            && file.filename.len() <= 512
+                            && filenames.insert(&file.filename),
+                        "invalid or duplicate Go catalog filename"
+                    );
+                }
+                files.insert(version.to_owned(), release.files);
                 versions.push(version.to_owned());
             }
             let versions = versions
@@ -92,6 +177,7 @@ async fn catalog() -> Result<&'static Catalog> {
                 .sorted_by_cached_key(|v| (Versioning::new(v), v.to_string()))
                 .collect();
             Ok(Catalog {
+                files,
                 versions,
                 digest: format!("sha256:{}", crate::hash::hash_sha256_to_str(raw)),
             })

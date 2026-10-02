@@ -159,3 +159,17 @@ limits and deadlines. Seven scenarios cover selection/cache/digest, missing meta
 duplicate/malformed/invalid-UTF-8 records and both catalog limits. Artifact-file parity, native
 directive discovery, publisher verification and production wiring remain unfinished.
 No dependency, registry data or preserved notice changed.
+
+Go target metadata now requires a stable release and exact upstream-derived
+filename in the same official catalog used for selection. `go/embedding.rs` owns
+both decoding and target-record matching; Go's shared artifact URL/layout logic
+remains in its parent backend. File OS/architecture/version/kind, positive byte
+size and SHA-256 must agree with the target; the existing sidecar is then fetched
+and must match the catalog hash. Output adds declared size and catalog digest.
+No file record is treated as publisher authentication or acquired-byte proof.
+
+Stable canonical releases allow at most 4,096 file records with nonempty bounded,
+unique filenames. Missing/invalid target records fail before sidecar acquisition.
+Conformance covers three targets, all identity fields, absent release/target,
+malformed sidecars and hash disagreement. Two additional process scenarios reject
+duplicate and excessive file records. No dependency or notice changed.

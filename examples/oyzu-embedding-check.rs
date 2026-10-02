@@ -13,6 +13,40 @@ use std::{
 
 const GO_CATALOG_SAMPLE: &str = r#"[{"version":"go1.25.0","stable":true},{"version":"go1.26rc1","stable":false},{"version":"go1.24.14","stable":true},{"version":"go1.24.13","stable":true},{"version":"go1.20","stable":true}]"#;
 
+fn go_archive_catalog() -> String {
+    let releases: Vec<_> = (13..=24)
+        .map(|patch| {
+            let version = format!("go1.24.{patch}");
+            let mut files: Vec<_> = [
+                ("linux", "amd64", "tar.gz"),
+                ("darwin", "arm64", "tar.gz"),
+                ("windows", "amd64", "zip"),
+            ]
+            .into_iter()
+            .map(|(os, arch, extension)| {
+                serde_json::json!({
+                    "filename": format!("{version}.{os}-{arch}.{extension}"),
+                    "os": os, "arch": arch, "version": version,
+                    "sha256": "a".repeat(64), "size": 123456, "kind": "archive"
+                })
+            })
+            .collect();
+            match patch {
+                18 => files.clear(),
+                19 => files[0]["os"] = "windows".into(),
+                20 => files[0]["arch"] = "arm64".into(),
+                21 => files[0]["version"] = "go1.24.13".into(),
+                22 => files[0]["kind"] = "source".into(),
+                23 => files[0]["size"] = 0.into(),
+                24 => files[0]["sha256"] = "invalid".into(),
+                _ => {}
+            }
+            serde_json::json!({"version": version, "stable": true, "files": files})
+        })
+        .collect();
+    serde_json::to_string(&releases).unwrap()
+}
+
 fn options(state: PathBuf) -> Result<Options> {
     Ok(Options {
         state,
@@ -47,6 +81,8 @@ fn main() -> Result<()> {
         "backend",
         "go-facts",
         "go-metadata",
+        "go-metadata-duplicate",
+        "go-metadata-files",
         "go-resolve",
         "go-resolve-duplicate",
         "go-resolve-malformed",
@@ -103,6 +139,8 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         scenario,
         "go-facts"
             | "go-metadata"
+            | "go-metadata-duplicate"
+            | "go-metadata-files"
             | "go-resolve"
             | "go-resolve-duplicate"
             | "go-resolve-malformed"
@@ -164,12 +202,34 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
             })
         }));
     }
+    if matches!(scenario, "go-metadata-duplicate" | "go-metadata-files") {
+        let calls = calls.clone();
+        let excessive = scenario == "go-metadata-files";
+        input.transport = Some(Arc::new(move |request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                ensure!(
+                    request.url.as_str() == "https://go.dev/dl/?mode=json&include=all",
+                    "invalid catalog acquired sidecar"
+                );
+                let mut records: serde_json::Value = serde_json::from_str(&go_archive_catalog())?;
+                let file = records[0]["files"][0].clone();
+                records[0]["files"] = vec![file; if excessive { 4097 } else { 2 }].into();
+                Ok(reqwest::Response::from(
+                    http::Response::builder()
+                        .status(200)
+                        .body(records.to_string())?,
+                ))
+            })
+        }));
+    }
     if scenario == "go-metadata" {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |request| {
             calls.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
                 let body = match request.url.as_str() {
+                    "https://go.dev/dl/?mode=json&include=all" => go_archive_catalog(),
                     "https://dl.google.com/go/go1.24.13.linux-amd64.tar.gz.sha256"
                     | "https://dl.google.com/go/go1.24.13.darwin-arm64.tar.gz.sha256"
                     | "https://dl.google.com/go/go1.24.13.windows-amd64.zip.sha256" => {
@@ -183,6 +243,9 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
                     }
                     "https://dl.google.com/go/go1.24.16.linux-amd64.tar.gz.sha256" => {
                         format!("{}{}", " ".repeat(129), "a".repeat(64))
+                    }
+                    "https://dl.google.com/go/go1.24.17.linux-amd64.tar.gz.sha256" => {
+                        "b".repeat(64)
                     }
                     _ => eyre::bail!("unexpected Go metadata route"),
                 };
@@ -403,14 +466,33 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         })?;
         return Ok(());
     }
+    if matches!(scenario, "go-metadata-duplicate" | "go-metadata-files") {
+        ensure!(
+            tokio::runtime::Runtime::new()?
+                .block_on(session.go_archive_metadata("1.24.13", "linux/amd64/gnu"))
+                .is_err(),
+            "ambiguous or excessive catalog files accepted"
+        );
+        ensure!(
+            calls.load(Ordering::SeqCst) == 1,
+            "invalid catalog reached sidecar"
+        );
+        return Ok(());
+    }
     if scenario == "go-metadata" {
         tokio::runtime::Runtime::new()?.block_on(async {
+            let selection = session.resolve_go_version("1.24.13", &[]).await?;
             for target in [
                 "linux/amd64/gnu",
                 "darwin/arm64/native",
                 "windows/amd64/msvc",
             ] {
                 let metadata = session.go_archive_metadata("1.24.13", target).await?;
+                ensure!(
+                    metadata.declared_size == 123456
+                        && metadata.catalog_sha256 == selection.catalog_sha256,
+                    "Go catalog size or identity differs"
+                );
                 ensure!(
                     metadata.declared_sha256 == format!("sha256:{}", "a".repeat(64)),
                     "Go digest normalization failed"
@@ -421,10 +503,11 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
                     "Go metadata changed archive facts"
                 );
             }
-            for version in ["1.24.14", "1.24.15", "1.24.16"] {
+            for patch in 14..=25 {
+                let version = format!("1.24.{patch}");
                 ensure!(
                     session
-                        .go_archive_metadata(version, "linux/amd64/gnu")
+                        .go_archive_metadata(&version, "linux/amd64/gnu")
                         .await
                         .is_err(),
                     "invalid Go checksum accepted"
@@ -439,7 +522,7 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
             Ok::<_, eyre::Error>(())
         })?;
         ensure!(
-            calls.load(Ordering::SeqCst) == 6,
+            calls.load(Ordering::SeqCst) == 8,
             "Go acquisition count differs"
         );
         return Ok(());

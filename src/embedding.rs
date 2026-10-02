@@ -236,9 +236,10 @@ impl Session {
             target,
         ))
     }
-    /// Fetch the target's declared SHA-256 through the supplied transport.
+    /// Bind the target's official catalog size/hash to its checksum sidecar.
     /// Reject malformed metadata; never fetch archive bytes or execute a target.
-    /// This does not prove catalog membership, publisher identity or byte integrity.
+    /// Returns catalog identity and declared size; publisher identity and acquired
+    /// byte integrity still require verification.
     pub async fn go_archive_metadata(
         &self,
         version: &str,
