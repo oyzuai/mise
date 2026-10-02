@@ -386,3 +386,21 @@ embedding harness scenarios pass. Native validation remains pending. A read-only
 release 20260807 on 2026-10-02 measured 122,082 bytes and 852 checksum rows, below
 the parser limits; this is size evidence, not retained provenance or real checksum
 replay. Dependencies, upstream notices and licensing decisions are unchanged.
+
+### Python public API metadata replay (validation in progress)
+
+The library-only harness now recognizes OYZU_PYTHON_METADATA_FIXTURE generated
+with the capture helper's --with-checksums option. A fresh child admits only Python,
+validates the three fixture targets and original response hashes, supplies captured
+binary responses through transport, and checks the public archive metadata result
+against the independent expected artifact/checksum identities. It requires exactly
+six requests (catalog and checksum per target); any uncaptured request fails.
+Fixture input is bounded to 100 MiB, each decoded response to 16 MiB, and production
+catalog/checksum limits remain enforced by the API. Existing private decoder replay
+remains separate. Linux passes all 28 ordinary scenarios and real Python metadata replay with
+container networking disabled. Formatting and strict library/example Clippy pass.
+Native CI uses the pinned checksum-capable capture helper and runs both private
+decoder and public Session replay; native results remain pending.
+
+This adds first-party conformance code without changing dependencies or notices.
+It does not authenticate publishers, acquire archives or authorize distribution.

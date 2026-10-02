@@ -5,6 +5,8 @@ mod go_replay;
 mod java_replay;
 #[path = "oyzu-embedding-check/python_catalog.rs"]
 mod python_catalog;
+#[path = "oyzu-embedding-check/python_replay.rs"]
+mod python_replay;
 
 use eyre::{Result, ensure};
 use mise::embedding::{Options, Session};
@@ -81,6 +83,7 @@ fn main() -> Result<()> {
     std::fs::write(root.join(".tool-versions"), "node this-must-not-be-read")?;
     let replay = std::env::var_os("OYZU_GO_METADATA_FIXTURE").map(PathBuf::from);
     let java_replay = std::env::var_os("OYZU_JAVA_METADATA_FIXTURE").map(PathBuf::from);
+    let python_replay = std::env::var_os("OYZU_PYTHON_METADATA_FIXTURE").map(PathBuf::from);
     let mut scenarios = vec![
         "offline",
         "transport",
@@ -117,6 +120,9 @@ fn main() -> Result<()> {
     if java_replay.is_some() {
         scenarios.push("java-real-metadata");
     }
+    if python_replay.is_some() {
+        scenarios.push("python-real-metadata");
+    }
     for scenario in scenarios {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -131,6 +137,15 @@ fn main() -> Result<()> {
             std::fs::write(state.join("go-replay.json"), go_replay::read(source)?)?;
         }
         let mut command = Command::new(std::env::current_exe()?);
+        if scenario == "python-real-metadata" {
+            let source = python_replay
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("missing Python fixture"))?;
+            std::fs::write(
+                state.join("python-replay.json"),
+                python_replay::read(source)?,
+            )?;
+        }
         if scenario == "java-real-metadata" {
             let source = java_replay
                 .as_ref()
@@ -165,6 +180,9 @@ fn main() -> Result<()> {
 }
 
 fn child(scenario: &str, state: PathBuf) -> Result<()> {
+    if scenario == "python-real-metadata" {
+        return python_replay::run(state);
+    }
     if scenario.starts_with("python-") {
         return python_catalog::run(scenario, state);
     }
