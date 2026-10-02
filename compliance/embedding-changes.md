@@ -143,3 +143,19 @@ size/content or installation authority. No dependency or notice changed.
 A thirteenth fresh-process scenario covers three targets, normalization, malformed
 and oversized checksums and invalid pre-acquisition inputs; existing scenarios
 also verify backend admission and supplied-transport denial.
+
+`Session::resolve_go_version` reuses the shared admitted stable-version selector
+now owned by `src/plugins/core/embedding_selection.rs`; Node keeps the same
+selection semantics. The selector validates inputs before metadata, intersects
+constraints through upstream range/prefix matching and requires catalog membership.
+Embedded Go uses the existing GitHub tag parser and HTTP transport with bounded
+complete pagination instead of its ordinary Git subprocess path. Its existing Go
+prefix filtering, prerelease rejection, deduplication and version ordering remain.
+The new explicit bounded GitHub API permits at most 1,000 pages and 100,000 tags,
+rejects repeated URLs and adds same-origin/credential checks to the bounded path. Ordinary
+upstream tag callers retain their previous behavior. Transport byte/time bounds
+remain the broker's responsibility. No commit-date fanout is introduced.
+Six fresh-process scenarios cover selection/constraints/cache, missing transport,
+pagination cycles, foreign next-page origins and both numeric limits. Exact archive availability, source
+verification, native Go directive discovery and production worker wiring remain
+unimplemented. No dependency, registry data or preserved notice changed.

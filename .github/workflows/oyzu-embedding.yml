@@ -48,7 +48,7 @@ jobs:
           key: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
       - name: Check embedding formatting
-        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/go.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs examples/oyzu-embedding-check.rs
+        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs crates/mise-util/src/github.rs src/plugins/core/go.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs examples/oyzu-embedding-check.rs
       - name: Check shared metadata utility library
         run: cargo +1.95.0 clippy --locked -p mise-util --lib --no-default-features --features rustls -- -D warnings
       - name: Check library and conformance target

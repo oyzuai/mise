@@ -339,7 +339,20 @@ impl Backend for GoPlugin {
 
         // Go uses tags, not releases. When MISE_LIST_ALL_VERSIONS is set,
         // we fetch tags with dates (slower). Otherwise, use fast method without dates.
-        let versions: Vec<VersionInfo> = if *env::MISE_LIST_ALL_VERSIONS {
+        let versions: Vec<VersionInfo> = if mise_util::embedding::context().is_some() {
+            github::list_tags_bounded(repo)
+                .await?
+                .into_iter()
+                .filter_map(|tag| tag.strip_prefix("go").map(str::to_owned))
+                .filter(|version| Self::is_valid_version(version))
+                .unique()
+                .sorted_by_cached_key(|version| (Versioning::new(version), version.to_string()))
+                .map(|version| VersionInfo {
+                    version,
+                    ..Default::default()
+                })
+                .collect()
+        } else if *env::MISE_LIST_ALL_VERSIONS {
             // Slow path: fetch tags with commit dates for versions host
             github::list_tags_with_dates(repo)
                 .await?

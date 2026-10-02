@@ -161,6 +161,19 @@ impl Session {
         crate::plugins::core::resolve_node_version(&self.config, request, native_constraints).await
     }
 
+    /// Resolve Go from the admitted upstream tag catalog with all constraints.
+    /// Embedded Go uses bounded supplied HTTP pagination, never git execution.
+    /// Only cataloged canonical stable versions are returned; archive availability
+    /// and publisher verification remain separate operations.
+    pub async fn resolve_go_version(
+        &self,
+        request: &str,
+        native_constraints: &[String],
+    ) -> Result<String> {
+        ensure!(self.tools.contains("go"), "Go backend is not admitted");
+        crate::plugins::core::resolve_go_version(&self.config, request, native_constraints).await
+    }
+
     /// Project names from this revision's baked registry onto admitted core
     /// backends. This is not version resolution or permission to install. No
     /// floating registry, ambient aliases, filesystem or network is consulted.

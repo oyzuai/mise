@@ -17,6 +17,7 @@ mod bun;
 mod deno;
 mod dotnet;
 mod elixir;
+mod embedding_selection;
 mod erlang;
 mod go;
 pub use go::{GoArchiveFacts, GoArchiveMetadata};
@@ -53,9 +54,15 @@ pub(crate) async fn resolve_node_version(
     request: &str,
     constraints: &[String],
 ) -> eyre::Result<String> {
-    node::NodePlugin::new()
-        .embedding_resolve_version(config, request, constraints)
+    embedding_selection::resolve_version(&node::NodePlugin::new(), config, request, constraints)
         .await
+}
+pub(crate) async fn resolve_go_version(
+    config: &Arc<crate::config::Config>,
+    request: &str,
+    constraints: &[String],
+) -> eyre::Result<String> {
+    embedding_selection::resolve_version(&go::GoPlugin::new(), config, request, constraints).await
 }
 pub(crate) fn node_archive_facts(
     version: &str,

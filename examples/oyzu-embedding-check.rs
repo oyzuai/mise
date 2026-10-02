@@ -45,6 +45,12 @@ fn main() -> Result<()> {
         "backend",
         "go-facts",
         "go-metadata",
+        "go-resolve",
+        "go-resolve-cycle",
+        "go-resolve-origin",
+        "go-resolve-pages",
+        "go-resolve-tags",
+        "go-resolve-offline",
         "java-metadata",
         "catalog",
         "node-resolve",
@@ -90,7 +96,17 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
     if scenario == "catalog" {
         input.tools = ["node", "go", "java", "python"].map(String::from).into();
     }
-    if matches!(scenario, "go-facts" | "go-metadata") {
+    if matches!(
+        scenario,
+        "go-facts"
+            | "go-metadata"
+            | "go-resolve"
+            | "go-resolve-cycle"
+            | "go-resolve-origin"
+            | "go-resolve-offline"
+            | "go-resolve-pages"
+            | "go-resolve-tags"
+    ) {
         input.tools = BTreeSet::from(["go".into()]);
     }
     if scenario == "java-metadata" {
@@ -115,6 +131,71 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if matches!(scenario, "go-resolve-pages" | "go-resolve-tags") {
+        let calls = calls.clone();
+        let pages = scenario == "go-resolve-pages";
+        input.transport = Some(Arc::new(move |request| {
+            let count = calls.fetch_add(1, Ordering::SeqCst) + 1;
+            Box::pin(async move {
+                ensure!(
+                    request.url.host_str() == Some("api.github.com"),
+                    "unexpected catalog host"
+                );
+                let mut response = http::Response::builder().status(200);
+                let body = if pages {
+                    response = response.header("link", format!("<https://api.github.com/repos/golang/go/tags?per_page=100&page={}>; rel=\"next\"", count + 1));
+                    "[]".to_owned()
+                } else {
+                    format!(
+                        "[{}]",
+                        std::iter::repeat_n(r#"{"name":"go1.24.13"}"#, 100_001)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )
+                };
+                Ok(reqwest::Response::from(response.body(body)?))
+            })
+        }));
+    }
+    if matches!(
+        scenario,
+        "go-resolve" | "go-resolve-cycle" | "go-resolve-origin"
+    ) {
+        let calls = calls.clone();
+        let cycle = scenario == "go-resolve-cycle";
+        let foreign = scenario == "go-resolve-origin";
+        input.transport = Some(Arc::new(move |request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let first = "https://api.github.com/repos/golang/go/tags?per_page=100";
+                let second = "https://api.github.com/repos/golang/go/tags?per_page=100&page=2";
+                let (body, next) = if request.url.as_str() == first {
+                    (
+                        r#"[{"name":"go1.25.0"},{"name":"go1.25rc1"},{"name":"unrelated"}]"#,
+                        Some(if foreign {
+                            "https://foreign.invalid/catalog"
+                        } else if cycle {
+                            first
+                        } else {
+                            second
+                        }),
+                    )
+                } else if request.url.as_str() == second {
+                    (
+                        r#"[{"name":"go1.24.14"},{"name":"go1.24.13"},{"name":"go1"},{"name":"go1.24.13"}]"#,
+                        None,
+                    )
+                } else {
+                    eyre::bail!("unexpected Go catalog route");
+                };
+                let mut response = http::Response::builder().status(200);
+                if let Some(next) = next {
+                    response = response.header("link", format!("<{next}>; rel=\"next\""));
+                }
+                Ok(reqwest::Response::from(response.body(body.to_owned())?))
+            })
+        }));
+    }
     if scenario == "go-metadata" {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |request| {
@@ -298,6 +379,68 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         );
         return Ok(());
     }
+    if scenario.starts_with("go-resolve") {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            for request in ["system", "path:./go", "", "1.24\n"] {
+                ensure!(
+                    session.resolve_go_version(request, &[]).await.is_err(),
+                    "invalid Go selector accepted"
+                );
+            }
+            ensure!(
+                calls.load(Ordering::SeqCst) == 0,
+                "invalid selectors acquired metadata"
+            );
+            if scenario != "go-resolve" {
+                ensure!(
+                    session.resolve_go_version("1.24.13", &[]).await.is_err(),
+                    "Go resolution bypassed missing metadata or cyclic pagination"
+                );
+                ensure!(
+                    calls.load(Ordering::SeqCst)
+                        == match scenario {
+                            "go-resolve-cycle" | "go-resolve-tags" | "go-resolve-origin" => 1,
+                            "go-resolve-pages" => 1000,
+                            _ => 0,
+                        },
+                    "unexpected denied catalog requests"
+                );
+                return Ok::<_, eyre::Error>(());
+            }
+            for (request, constraints, expected) in [
+                ("1.24", vec![], "1.24.14"),
+                (
+                    "latest",
+                    vec![">=1.24".into(), "<1.24.14".into()],
+                    "1.24.13",
+                ),
+                ("^1.24.0", vec![], "1.25.0"),
+                ("1.24.13", vec![], "1.24.13"),
+            ] {
+                ensure!(
+                    session.resolve_go_version(request, &constraints).await? == expected,
+                    "wrong Go selection"
+                );
+            }
+            ensure!(
+                session.resolve_go_version("1.24.12", &[]).await.is_err(),
+                "uncataloged Go pin accepted"
+            );
+            ensure!(
+                session
+                    .resolve_go_version("1.24", &[">=1.25".into()])
+                    .await
+                    .is_err(),
+                "conflicting Go constraint accepted"
+            );
+            ensure!(
+                calls.load(Ordering::SeqCst) == 2,
+                "Go catalog cache or pagination differs"
+            );
+            Ok(())
+        })?;
+        return Ok(());
+    }
     if scenario == "go-metadata" {
         tokio::runtime::Runtime::new()?.block_on(async {
             for target in [
@@ -357,6 +500,12 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         );
         return Ok(());
     }
+    ensure!(
+        tokio::runtime::Runtime::new()?
+            .block_on(session.resolve_go_version("1.24", &[]))
+            .is_err(),
+        "Go resolution escaped session admission"
+    );
     ensure!(
         tokio::runtime::Runtime::new()?
             .block_on(session.go_archive_metadata("1.24.13", "linux/amd64/gnu"))
