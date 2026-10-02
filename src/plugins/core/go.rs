@@ -39,6 +39,13 @@ pub struct GoArchiveFacts {
     pub goroot_relative_path: String,
 }
 
+/// Declared checksum metadata only, not publisher authentication or artifact proof.
+#[derive(Debug, serde::Serialize)]
+pub struct GoArchiveMetadata {
+    pub archive: GoArchiveFacts,
+    pub declared_sha256: String,
+}
+
 #[derive(Debug)]
 pub(super) struct GoPlugin {
     ba: Arc<BackendArg>,
@@ -104,6 +111,28 @@ impl GoPlugin {
             bin_relative_path: GO_BIN_DIRECTORY.into(),
             goroot_relative_path: ".".into(),
         }
+    }
+
+    pub(super) async fn embedding_archive_metadata(
+        &self,
+        version: &str,
+        target: &PlatformTarget,
+        target_key: &str,
+    ) -> Result<GoArchiveMetadata> {
+        let archive = self.embedding_archive_facts(version, target, target_key);
+        let text = HTTP.get_text(&archive.checksum_url).await?;
+        // The upstream endpoint contains one digest, optionally newline-terminated.
+        // Bound before trimming so excessive surrounding whitespace is rejected.
+        eyre::ensure!(text.len() <= 128, "Go checksum metadata exceeds limit");
+        let digest = text.trim();
+        eyre::ensure!(
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "invalid Go SHA-256 metadata"
+        );
+        Ok(GoArchiveMetadata {
+            archive,
+            declared_sha256: format!("sha256:{}", digest.to_ascii_lowercase()),
+        })
     }
 
     /// Check if a Go version string is valid (not "1" and not beta/rc)

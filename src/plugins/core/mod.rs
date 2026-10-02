@@ -19,7 +19,16 @@ mod dotnet;
 mod elixir;
 mod erlang;
 mod go;
-pub use go::GoArchiveFacts;
+pub use go::{GoArchiveFacts, GoArchiveMetadata};
+pub(crate) async fn go_archive_metadata(
+    version: &str,
+    target: &crate::backend::platform_target::PlatformTarget,
+    target_key: &str,
+) -> eyre::Result<GoArchiveMetadata> {
+    go::GoPlugin::new()
+        .embedding_archive_metadata(version, target, target_key)
+        .await
+}
 pub(crate) fn go_archive_facts(
     version: &str,
     target: &crate::backend::platform_target::PlatformTarget,

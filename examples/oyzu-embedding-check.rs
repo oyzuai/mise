@@ -44,6 +44,7 @@ fn main() -> Result<()> {
         "node-denied",
         "backend",
         "go-facts",
+        "go-metadata",
         "java-metadata",
         "catalog",
         "node-resolve",
@@ -89,7 +90,7 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
     if scenario == "catalog" {
         input.tools = ["node", "go", "java", "python"].map(String::from).into();
     }
-    if scenario == "go-facts" {
+    if matches!(scenario, "go-facts" | "go-metadata") {
         input.tools = BTreeSet::from(["go".into()]);
     }
     if scenario == "java-metadata" {
@@ -114,6 +115,34 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if scenario == "go-metadata" {
+        let calls = calls.clone();
+        input.transport = Some(Arc::new(move |request| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let body = match request.url.as_str() {
+                    "https://dl.google.com/go/go1.24.13.linux-amd64.tar.gz.sha256"
+                    | "https://dl.google.com/go/go1.24.13.darwin-arm64.tar.gz.sha256"
+                    | "https://dl.google.com/go/go1.24.13.windows-amd64.zip.sha256" => {
+                        format!("{}\n", "A".repeat(64))
+                    }
+                    "https://dl.google.com/go/go1.24.14.linux-amd64.tar.gz.sha256" => {
+                        "invalid".into()
+                    }
+                    "https://dl.google.com/go/go1.24.15.linux-amd64.tar.gz.sha256" => {
+                        format!("{} {}", "a".repeat(64), "b".repeat(64))
+                    }
+                    "https://dl.google.com/go/go1.24.16.linux-amd64.tar.gz.sha256" => {
+                        format!("{}{}", " ".repeat(129), "a".repeat(64))
+                    }
+                    _ => eyre::bail!("unexpected Go metadata route"),
+                };
+                Ok(reqwest::Response::from(
+                    http::Response::builder().status(200).body(body)?,
+                ))
+            })
+        }));
+    }
     if scenario == "node-metadata" {
         let calls = calls.clone();
         input.transport = Some(Arc::new(move |request| {
@@ -269,14 +298,71 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         );
         return Ok(());
     }
+    if scenario == "go-metadata" {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            for target in [
+                "linux/amd64/gnu",
+                "darwin/arm64/native",
+                "windows/amd64/msvc",
+            ] {
+                let metadata = session.go_archive_metadata("1.24.13", target).await?;
+                ensure!(
+                    metadata.declared_sha256 == format!("sha256:{}", "a".repeat(64)),
+                    "Go digest normalization failed"
+                );
+                ensure!(
+                    serde_json::to_value(metadata.archive)?
+                        == serde_json::to_value(session.go_archive_facts("1.24.13", target)?)?,
+                    "Go metadata changed archive facts"
+                );
+            }
+            for version in ["1.24.14", "1.24.15", "1.24.16"] {
+                ensure!(
+                    session
+                        .go_archive_metadata(version, "linux/amd64/gnu")
+                        .await
+                        .is_err(),
+                    "invalid Go checksum accepted"
+                );
+            }
+            for (version, target) in [("1.24", "linux/amd64/gnu"), ("1.24.13", "linux/arm64/gnu")] {
+                ensure!(
+                    session.go_archive_metadata(version, target).await.is_err(),
+                    "invalid Go metadata input accepted"
+                );
+            }
+            Ok::<_, eyre::Error>(())
+        })?;
+        ensure!(
+            calls.load(Ordering::SeqCst) == 6,
+            "Go acquisition count differs"
+        );
+        return Ok(());
+    }
     if scenario == "go-facts" {
         tokio::runtime::Runtime::new()?.block_on(check_go_facts(&session))?;
         ensure!(
             calls.load(Ordering::SeqCst) == 0,
             "Go facts acquired metadata"
         );
+        ensure!(
+            tokio::runtime::Runtime::new()?
+                .block_on(session.go_archive_metadata("1.24.13", "linux/amd64/gnu"))
+                .is_err(),
+            "Go metadata ignored transport denial"
+        );
+        ensure!(
+            calls.load(Ordering::SeqCst) == 1,
+            "Go metadata transport denial was bypassed"
+        );
         return Ok(());
     }
+    ensure!(
+        tokio::runtime::Runtime::new()?
+            .block_on(session.go_archive_metadata("1.24.13", "linux/amd64/gnu"))
+            .is_err(),
+        "Go metadata escaped session admission"
+    );
     ensure!(
         session
             .go_archive_facts("1.24.13", "linux/amd64/gnu")

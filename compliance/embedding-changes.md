@@ -132,3 +132,14 @@ Missing target entries fail without source compilation or another target fallbac
 A twelfth fresh-process scenario covers three targets, manifest cache reuse,
 malformed/ambiguous/missing entries and parser bounds; existing no-transport and
 admission scenarios cover the new operation. No dependency or notice changed.
+
+`Session::go_archive_metadata` reuses Go's target archive facts and checksum URL,
+fetches only its declared SHA-256 through the supplied HTTP transport, bounds the
+text to 128 bytes and rejects anything except one 64-character hexadecimal digest
+with optional surrounding whitespace. Output normalizes hex case. Session backend,
+exact stable version and target admission happen before acquisition. The operation
+does not establish catalog membership, authenticated publisher evidence, artifact
+size/content or installation authority. No dependency or notice changed.
+A thirteenth fresh-process scenario covers three targets, normalization, malformed
+and oversized checksums and invalid pre-acquisition inputs; existing scenarios
+also verify backend admission and supplied-transport denial.

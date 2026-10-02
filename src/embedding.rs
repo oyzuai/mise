@@ -28,9 +28,9 @@ pub struct Session {
     tools: BTreeSet<String>,
 }
 
-pub use crate::plugins::core::GoArchiveFacts;
 pub use crate::plugins::core::NodeArchiveFacts;
 pub use crate::plugins::core::NodeArchiveMetadata;
+pub use crate::plugins::core::{GoArchiveFacts, GoArchiveMetadata};
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SETTINGS: OnceLock<Arc<settings::Settings>> = OnceLock::new();
 
@@ -223,6 +223,18 @@ impl Session {
             target,
         ))
     }
+    /// Fetch the target's declared SHA-256 through the supplied transport.
+    /// Reject malformed metadata; never fetch archive bytes or execute a target.
+    /// This does not prove catalog membership, publisher identity or byte integrity.
+    pub async fn go_archive_metadata(
+        &self,
+        version: &str,
+        target: &str,
+    ) -> Result<GoArchiveMetadata> {
+        let platform = self.archive_target("go", version, target)?;
+        crate::plugins::core::go_archive_metadata(version, &platform, target).await
+    }
+
     fn archive_target(
         &self,
         tool: &str,
