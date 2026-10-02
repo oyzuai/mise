@@ -1,4 +1,7 @@
 //! Library-only process-boundary conformance; never builds/runs the mise CLI.
+#[path = "oyzu-embedding-check/go_replay.rs"]
+mod go_replay;
+
 use eyre::{Result, ensure};
 use mise::embedding::{Options, Session};
 use std::{
@@ -72,7 +75,8 @@ fn main() -> Result<()> {
     let root = directory.path().canonicalize()?;
     std::fs::write(root.join("mise.toml"), "this is not valid TOML [")?;
     std::fs::write(root.join(".tool-versions"), "node this-must-not-be-read")?;
-    for scenario in [
+    let replay = std::env::var_os("OYZU_GO_METADATA_FIXTURE").map(PathBuf::from);
+    let mut scenarios = vec![
         "offline",
         "transport",
         "hostile",
@@ -95,13 +99,23 @@ fn main() -> Result<()> {
         "node-resolve",
         "node-resolve-offline",
         "node-metadata",
-    ] {
+    ];
+    if replay.is_some() {
+        scenarios.push("go-real-metadata");
+    }
+    for scenario in scenarios {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
         std::fs::write(
             state.join("home/.mise.toml"),
             "invalid global configuration [",
         )?;
+        if scenario == "go-real-metadata" {
+            let source = replay
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("missing replay fixture"))?;
+            std::fs::write(state.join("go-replay.json"), go_replay::read(source)?)?;
+        }
         let mut command = Command::new(std::env::current_exe()?);
         command
             .env_clear()
@@ -137,7 +151,8 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
     }
     if matches!(
         scenario,
-        "go-facts"
+        "go-real-metadata"
+            | "go-facts"
             | "go-metadata"
             | "go-metadata-duplicate"
             | "go-metadata-files"
@@ -173,6 +188,9 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if scenario == "go-real-metadata" {
+        go_replay::configure(&mut input, &state, calls.clone())?;
+    }
     if scenario.starts_with("go-resolve") && scenario != "go-resolve-offline" {
         let calls = calls.clone();
         let mode = scenario.to_owned();
@@ -408,6 +426,10 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
             calls.load(Ordering::SeqCst) == 3,
             "Java metadata must use one supplied request per target"
         );
+        return Ok(());
+    }
+    if scenario == "go-real-metadata" {
+        tokio::runtime::Runtime::new()?.block_on(go_replay::check(&session, &state, &calls))?;
         return Ok(());
     }
     if scenario.starts_with("go-resolve") {

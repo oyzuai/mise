@@ -173,3 +173,15 @@ unique filenames. Missing/invalid target records fail before sidecar acquisition
 Conformance covers three targets, all identity fields, absent release/target,
 malformed sidecars and hash disagreement. Two additional process scenarios reject
 duplicate and excessive file records. No dependency or notice changed.
+
+The library conformance executable optionally accepts an external captured fixture
+through its parent-only `OYZU_GO_METADATA_FIXTURE` environment variable. The parent
+bounds it to 32 MiB and copies it into a fresh worker state; the variable is not
+inherited by the embedding child. `examples/oyzu-embedding-check/go_replay.rs`
+checks captured response sizes/hashes and compares exact version, target, upstream
+archive URL, declared size/hash and catalog digest for every expected case. Only
+listed response URLs are served, with no transport fallback. This is test input,
+not source approval. Ordinary conformance remains independent of network/fixtures.
+A fixture provisioned by Oyzu's public metadata capture helper covered Go 1.24.13
+and 1.25.0 on the initial three targets. Linux replay passed with Docker networking
+disabled; changing an expected size failed. No archive or target executable ran.
