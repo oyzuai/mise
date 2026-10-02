@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 SPEC = importlib.util.spec_from_file_location("candidate_graph", Path(__file__).with_name("cargo_graph.py"))
 graph = importlib.util.module_from_spec(SPEC)
@@ -48,6 +49,17 @@ class GraphTests(unittest.TestCase):
         self.assertFalse(report["release_ready"])
         self.assertTrue(all(p["disposition"] == "unreviewed" for p in report["packages"]))
         self.assertNotIn(str(self.root),str(report))
+
+    def test_unreadable_notice_directory_cannot_produce_partial_report(self):
+        def unreadable(root, *, followlinks, onerror):
+            self.assertFalse(followlinks)
+            onerror(PermissionError("synthetic private path"))
+            return iter(())
+
+        with mock.patch.object(graph.os, "walk", side_effect=unreadable):
+            with self.assertRaisesRegex(ValueError, "notice directory could not be read") as failure:
+                self.report()
+        self.assertNotIn("synthetic private path", str(failure.exception))
 
     def test_build_dependency_closure_and_normal_plus_dev_edges_are_retained(self):
         self.nodes[2]["deps"]=[{"pkg":"dev-only","dep_kinds":[{"kind":None},{"kind":"dev"}]}]

@@ -44,7 +44,12 @@ def notices(package):
     found = []
     seen = 0
     skipped = 0
-    for directory, dirs, files in os.walk(root, followlinks=False):
+    def scan_error(error):
+        # os.walk otherwise ignores unreadable directories. An incomplete scan
+        # must never look like successful notice evidence. Do not relay paths.
+        raise ValueError("package notice directory could not be read") from error
+
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=scan_error):
         dirs[:] = sorted(d for d in dirs if d not in {".git", "target"})
         for name in list(dirs):
             child = Path(directory) / name

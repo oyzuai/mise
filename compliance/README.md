@@ -123,6 +123,8 @@ graph, not the exact compiled or distributed graph or a release SBOM.
 
 Scans are bounded to 4,096 packages, 100,000 directory entries per package,
 4,096 conventional notice files per package and 2 MiB per notice. Directory
+enumeration failures reject collection rather than silently omitting notices.
+No successful partial report is returned for an unreadable directory. Directory
 symlinks/junctions and symlinked notices are excluded and counted; unresolved or
 external declared license files are explicitly recorded. Repository package scans
 may include nested package notices. Source headers, generated and vendored code,
