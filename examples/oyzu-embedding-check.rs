@@ -1,6 +1,8 @@
 //! Library-only process-boundary conformance; never builds/runs the mise CLI.
 #[path = "oyzu-embedding-check/go_replay.rs"]
 mod go_replay;
+#[path = "oyzu-embedding-check/java_replay.rs"]
+mod java_replay;
 
 use eyre::{Result, ensure};
 use mise::embedding::{Options, Session};
@@ -76,6 +78,7 @@ fn main() -> Result<()> {
     std::fs::write(root.join("mise.toml"), "this is not valid TOML [")?;
     std::fs::write(root.join(".tool-versions"), "node this-must-not-be-read")?;
     let replay = std::env::var_os("OYZU_GO_METADATA_FIXTURE").map(PathBuf::from);
+    let java_replay = std::env::var_os("OYZU_JAVA_METADATA_FIXTURE").map(PathBuf::from);
     let mut scenarios = vec![
         "offline",
         "transport",
@@ -103,6 +106,9 @@ fn main() -> Result<()> {
     if replay.is_some() {
         scenarios.push("go-real-metadata");
     }
+    if java_replay.is_some() {
+        scenarios.push("java-real-metadata");
+    }
     for scenario in scenarios {
         let state = root.join(scenario);
         std::fs::create_dir_all(state.join("home"))?;
@@ -117,6 +123,12 @@ fn main() -> Result<()> {
             std::fs::write(state.join("go-replay.json"), go_replay::read(source)?)?;
         }
         let mut command = Command::new(std::env::current_exe()?);
+        if scenario == "java-real-metadata" {
+            let source = java_replay
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("missing Java fixture"))?;
+            std::fs::write(state.join("java-replay.json"), java_replay::read(source)?)?;
+        }
         command
             .env_clear()
             .current_dir(&root)
@@ -166,7 +178,7 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
     ) {
         input.tools = BTreeSet::from(["go".into()]);
     }
-    if scenario == "java-metadata" {
+    if matches!(scenario, "java-metadata" | "java-real-metadata") {
         input.tools = BTreeSet::from(["java".into()]);
     }
     if scenario == "node-denied" {
@@ -188,6 +200,9 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
         return Ok(());
     }
     let calls = Arc::new(AtomicUsize::new(0));
+    if scenario == "java-real-metadata" {
+        java_replay::configure(&mut input, &state, calls.clone())?;
+    }
     if scenario == "go-real-metadata" {
         go_replay::configure(&mut input, &state, calls.clone())?;
     }
@@ -418,6 +433,10 @@ fn child(scenario: &str, state: PathBuf) -> Result<()> {
             session.tool_aliases()? == aliases,
             "catalog changed after reload"
         );
+        return Ok(());
+    }
+    if scenario == "java-real-metadata" {
+        tokio::runtime::Runtime::new()?.block_on(java_replay::check(&session, &state, &calls))?;
         return Ok(());
     }
     if scenario == "java-metadata" {

@@ -49,7 +49,7 @@ jobs:
           key: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
           restore-keys: oyzu-embedding-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
       - name: Check embedding formatting
-        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs src/plugins/core/go.rs src/plugins/core/go/embedding.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs examples/oyzu-embedding-check.rs examples/oyzu-embedding-check/go_replay.rs
+        run: rustfmt +1.95.0 --check --edition 2024 --config skip_children=true src/embedding.rs src/plugins/core/mod.rs src/plugins/core/node.rs src/plugins/core/node/embedding.rs src/plugins/core/embedding_selection.rs src/plugins/core/go.rs src/plugins/core/go/embedding.rs crates/mise-util/src/embedding.rs crates/mise-util/src/hash.rs examples/oyzu-embedding-check.rs examples/oyzu-embedding-check/go_replay.rs examples/oyzu-embedding-check/java_replay.rs
       - name: Check shared metadata utility library
         run: cargo +1.95.0 clippy --locked -p mise-util --lib --no-default-features --features rustls -- -D warnings
       - name: Check library and conformance target
@@ -86,6 +86,42 @@ jobs:
         env:
           OYZU_GO_METADATA_FIXTURE: ${{ runner.temp }}/go-metadata-fixture.json
         run: cargo +1.95.0 run --locked --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua
+      - name: Capture real Java qualification metadata
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import urllib.request
+
+          revision = "373cfd383b05ea03145524f56b7d3b97c5d503ff"
+          url = f"https://raw.githubusercontent.com/micahlmartin/oyzu/{revision}/tooling/mise-upstream/capture_java_metadata.py"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              source = response.read(65537)
+          if len(source) > 65536 or hashlib.sha256(source).hexdigest() != "bcdcb656d463f5c7ac25a25bb55243edfdcb474768a88d337fafd294d5a73fdc":
+              raise RuntimeError("pinned Java fixture provisioner hash mismatch")
+          output = Path(os.environ["RUNNER_TEMP"]) / "java-metadata-fixture.json"
+          with tempfile.TemporaryDirectory() as temporary:
+              script = Path(temporary) / "tooling/mise-upstream/capture_java_metadata.py"
+              script.parent.mkdir(parents=True)
+              script.write_bytes(source)
+              with (output.parent / "java-metadata-capture-report.json").open("w", encoding="utf-8") as report:
+                  subprocess.run([sys.executable, str(script), "--output", str(output)], check=True, stdout=report)
+      - name: Replay real Java metadata through the library
+        env:
+          OYZU_JAVA_METADATA_FIXTURE: ${{ runner.temp }}/java-metadata-fixture.json
+        run: cargo +1.95.0 run --locked --example oyzu-embedding-check --no-default-features --features rustls,vfox/vendored-lua
+      - name: Preserve real Java metadata evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: java-metadata-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/java-metadata-fixture.json
+            ${{ runner.temp }}/java-metadata-capture-report.json
       - name: Preserve real Go metadata evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

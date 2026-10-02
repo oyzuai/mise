@@ -199,3 +199,23 @@ The example-file workflow filters were also corrected to separate the entrypoint
 from its directory glob. Workflow syntax/path filters and the exact provisioner
 step passed locally on Windows; new native workflow execution remains pending.
 No dependency, preserved notice or product Rust implementation changed.
+
+### Captured Java metadata replay
+
+The library-only harness accepts OYZU_JAVA_METADATA_FIXTURE for a bounded 32 MiB
+fixture produced by Oyzu's pinned capture_java_metadata.py. It verifies original
+catalog sizes/hashes, admits only Java, and supplies the three captured catalog
+URLs through the embedding callback. The actual Java backend resolves
+`temurin-21.0.6+7.0.LTS` for Linux amd64, macOS arm64 and Windows amd64 and must
+match independent expected archive URLs/checksums; an unavailable version fails.
+Only three catalog requests are allowed. All ordinary conformance cases still
+run. The environment variable selects test data only, never a product route.
+
+Linux strict library/example Clippy, pinned formatting and 22 ordinary cases plus
+this three-target replay pass. Replay runs with networking disabled. Native CI
+now captures and retains the fixture and runs the same case on all three hosts;
+those outcomes are pending. This changes first-party harness/CI/documentation
+only, with no dependency or upstream notice changes. Declared checksum agreement
+is not publisher verification, exact/range Java resolution admission, artifact
+installation, legal approval or production integration. No mise CLI is built or
+invoked; the example links the existing library candidate.
