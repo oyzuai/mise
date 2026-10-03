@@ -438,3 +438,5 @@ pinned inputs and isolate installer networking. The ordinary installer remains
 available for existing standalone callers. This is first-party boundary code;
 no dependencies, licenses or upstream notices change. Product-side installation
 and offline replay are the focused validation; broad qualification is separate.
+
+The frozen distribution method also disables rustup's toolchain-install self-update. The first isolated proof installed Rust but correctly failed when rustup requested unpinned rolling self-update metadata; the bootstrap remains owned by the caller's exact recipe.

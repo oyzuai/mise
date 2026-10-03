@@ -587,6 +587,18 @@ impl Backend for RustPlugin {
         if let Some(profile) = profile.as_ref() {
             cmd = cmd.arg("--profile").arg(profile);
         }
+        // A caller supplying a frozen distribution owns the rustup bootstrap
+        // version too; installation must not replace it from a rolling channel.
+        if tv
+            .request
+            .options()
+            .opts
+            .get("no_self_update")
+            .and_then(toml::Value::as_bool)
+            == Some(true)
+        {
+            cmd = cmd.arg("--no-self-update");
+        }
         cmd.execute()?;
 
         file::remove_all(tv.install_path())?;

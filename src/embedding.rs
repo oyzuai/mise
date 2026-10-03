@@ -202,6 +202,9 @@ impl Session {
         );
         let mut options = ToolVersionOptions::default();
         if let Some(distribution) = distribution {
+            options
+                .opts
+                .insert("no_self_update".into(), toml::Value::Boolean(true));
             ensure!(
                 distribution.is_absolute(),
                 "Rust distribution must be absolute"
