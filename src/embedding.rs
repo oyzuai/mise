@@ -180,13 +180,8 @@ impl Session {
             .opts
             .insert("profile".into(), toml::Value::String("minimal".into()));
         for (name, values) in [("components", components), ("targets", targets)] {
-            ensure!(
-                values.iter().all(|value| !value.is_empty()
-                    && value
-                        .bytes()
-                        .all(|c| c.is_ascii_alphanumeric() || c == b'-')),
-                "invalid Rust installation item"
-            );
+            // Rustup validates native names. Preserve them as separate arguments
+            // through the backend instead of imposing another target grammar.
             if !values.is_empty() {
                 options.opts.insert(
                     name.into(),
