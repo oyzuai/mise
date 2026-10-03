@@ -165,6 +165,31 @@ impl Session {
         components: &[String],
         targets: &[String],
     ) -> Result<PathBuf> {
+        self.install_rust_distribution(version, components, targets, None)
+            .await
+    }
+
+    /// Install from a host-verified local distribution mirror. The host supplies
+    /// the pinned manifest and payloads and owns sandbox network isolation.
+    /// No ambient environment override is admitted by this operation.
+    pub async fn install_rust_from_directory(
+        &self,
+        version: &str,
+        components: &[String],
+        targets: &[String],
+        distribution: &std::path::Path,
+    ) -> Result<PathBuf> {
+        self.install_rust_distribution(version, components, targets, Some(distribution))
+            .await
+    }
+
+    async fn install_rust_distribution(
+        &self,
+        version: &str,
+        components: &[String],
+        targets: &[String],
+        distribution: Option<&std::path::Path>,
+    ) -> Result<PathBuf> {
         use crate::toolset::{ToolRequest, ToolSource, ToolVersion, ToolVersionOptions, Toolset};
         ensure!(self.tools.contains("rust"), "Rust backend is not admitted");
         let parts: Vec<_> = version.split('.').collect();
@@ -176,6 +201,26 @@ impl Session {
             "Rust embedding requires an exact stable version"
         );
         let mut options = ToolVersionOptions::default();
+        if let Some(distribution) = distribution {
+            ensure!(
+                distribution.is_absolute(),
+                "Rust distribution must be absolute"
+            );
+            let distribution = distribution.canonicalize()?;
+            ensure!(
+                distribution.is_dir(),
+                "Rust distribution must be a directory"
+            );
+            let url = url::Url::from_directory_path(distribution)
+                .map_err(|_| eyre::eyre!("invalid Rust distribution directory"))?;
+            let root = url.as_str().trim_end_matches('/');
+            for (key, value) in [
+                ("RUSTUP_DIST_SERVER", root.to_owned()),
+                ("RUSTUP_UPDATE_ROOT", format!("{root}/rustup")),
+            ] {
+                options.core.install_env.insert(key.into(), value.into());
+            }
+        }
         options
             .opts
             .insert("profile".into(), toml::Value::String("minimal".into()));

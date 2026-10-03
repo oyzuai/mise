@@ -427,3 +427,14 @@ Bootstrap HTTP uses the supplied callback; rustup subprocess downloads use their
 normal public paths. The caller must not advertise this as enforced proxy support.
 The frontend owns lock identity, final storage and cached restoration. No new
 third-party source, dependencies or license alternatives are introduced.
+
+## Host-verified Rust distribution directory
+
+`Session::install_rust_from_directory` extends the existing exact Rust installer
+with an explicit absolute local distribution directory. It uses the native
+backend's typed install environment for Rustup distribution/update roots; ambient
+environment admission is unchanged. The frontend must verify the directory's
+pinned inputs and isolate installer networking. The ordinary installer remains
+available for existing standalone callers. This is first-party boundary code;
+no dependencies, licenses or upstream notices change. Product-side installation
+and offline replay are the focused validation; broad qualification is separate.
