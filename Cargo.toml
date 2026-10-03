@@ -346,7 +346,9 @@ test-log = "0.2"
 [features]
 vendored-lua = ["vfox/vendored-lua"]
 self_update = ["dep:self-replace", "dep:tar", "dep:zipsign-api"]
-default = ["native-tls", "vfox/vendored-lua", "self_update"]
+default = ["native-tls", "vfox/vendored-lua", "self_update", "history-notifications"]
+# Desktop sync-conflict alerts; library consumers may omit this feature.
+history-notifications = []
 native-tls = [
   "gix/blocking-http-transport-reqwest-native-tls",
   "reqwest/native-tls",

@@ -4,6 +4,7 @@
 use serde::Serialize as _;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "history-notifications")]
 use std::process::Command;
 use std::{env, fs};
 
@@ -31,6 +32,7 @@ fn main() -> Result<()> {
     }
     built::write_built_file()?;
     link_without_pie();
+    #[cfg(feature = "history-notifications")]
     build_notification_helper()?;
 
     let aqua_registry = load_aqua_registry()?;
@@ -59,6 +61,7 @@ fn link_without_pie() {
     }
 }
 
+#[cfg(feature = "history-notifications")]
 fn build_notification_helper() -> Result<()> {
     let source = "src/system/history/notify/macos.m";
     let info = "src/system/history/notify/macos.plist";

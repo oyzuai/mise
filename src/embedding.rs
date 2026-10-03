@@ -1,5 +1,8 @@
 //! Unstable Oyzu embedding boundary. One context per fresh worker process.
 //! The frontend owns configuration, locks, receipts, admission and isolation.
+//! Headless consumers disable default features and omit `history-notifications`.
+//! This excludes desktop notification delivery and the macOS helper app's
+//! compilation, embedding and signing; it does not disable file watching.
 use crate::config::{Config, settings};
 use eyre::{Result, ensure};
 pub use mise_util::embedding::{HttpFuture, HttpRequest, HttpTransport};

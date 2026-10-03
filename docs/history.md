@@ -1381,3 +1381,13 @@ Keep your repository and decryption identities recoverable independently.
 Repository authentication and an age identity serve different purposes:
 a replacement machine needs both Git access and a matching identity to
 restore encrypted files. Test fresh-machine setup before relying on it.
+
+## Library builds without desktop notifications
+
+The default-enabled Cargo feature `history-notifications` provides desktop
+alerts for sync conflicts. Headless library consumers can disable default
+features and select their required TLS and Lua features without enabling it.
+Such builds omit notification delivery on every platform, including the macOS
+helper application, embedded assets and build-time signing. Runtime notification
+settings cannot re-enable a capability excluded at compilation. File watching
+and conflict detection are unchanged.

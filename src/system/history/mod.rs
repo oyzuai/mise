@@ -16,7 +16,15 @@ pub mod health;
 pub mod journal;
 pub mod manifest;
 pub mod notices;
+#[cfg(feature = "history-notifications")]
 pub(crate) mod notify;
+
+// Keep sync independent of desktop delivery for headless library consumers.
+#[cfg(not(feature = "history-notifications"))]
+pub(crate) mod notify {
+    pub(crate) fn send(_title: &str, _body: &str) {}
+    pub(crate) fn warn_if_release_signing_unavailable() {}
+}
 pub(crate) mod recovery;
 pub mod replay;
 pub mod scope;
