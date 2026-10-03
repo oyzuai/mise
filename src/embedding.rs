@@ -154,6 +154,17 @@ impl Session {
     /// normal public route, so the host must not admit this in enforced mode.
     /// Returns the installed compiler sysroot; caller owns durable publication.
     pub async fn install_rust(&self, version: &str) -> Result<PathBuf> {
+        self.install_rust_with_components(version, &[], &[]).await
+    }
+
+    /// Install exact-version components and target standard libraries through
+    /// the native Rust backend. These are installation inputs, not host state.
+    pub async fn install_rust_with_components(
+        &self,
+        version: &str,
+        components: &[String],
+        targets: &[String],
+    ) -> Result<PathBuf> {
         use crate::toolset::{ToolRequest, ToolSource, ToolVersion, ToolVersionOptions, Toolset};
         ensure!(self.tools.contains("rust"), "Rust backend is not admitted");
         let parts: Vec<_> = version.split('.').collect();
@@ -168,6 +179,21 @@ impl Session {
         options
             .opts
             .insert("profile".into(), toml::Value::String("minimal".into()));
+        for (name, values) in [("components", components), ("targets", targets)] {
+            ensure!(
+                values.iter().all(|value| !value.is_empty()
+                    && value
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || c == b'-')),
+                "invalid Rust installation item"
+            );
+            if !values.is_empty() {
+                options.opts.insert(
+                    name.into(),
+                    toml::Value::Array(values.iter().cloned().map(toml::Value::String).collect()),
+                );
+            }
+        }
         let request = ToolRequest::new_with_options(
             Arc::new(crate::args::BackendArg::from("rust")),
             version,
